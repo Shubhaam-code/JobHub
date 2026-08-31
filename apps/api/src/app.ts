@@ -7,6 +7,8 @@ import { env } from './config/env.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { notFoundHandler } from './middleware/not-found.js';
 import { createRequestLogger } from './middleware/request-logger.js';
+import { adminRouter } from './routes/admin.route.js';
+import { authRouter } from './routes/auth.route.js';
 import { healthRouter } from './routes/health.route.js';
 import { apiRouter } from './routes/index.js';
 
@@ -29,6 +31,11 @@ export function createApp(): Express {
 
   // Unversioned infrastructure probes.
   app.use('/health', healthRouter);
+
+  // Authentication, and the admin-only surface behind it. Unversioned: these are
+  // operator endpoints, not part of the public product API.
+  app.use('/api/auth', authRouter);
+  app.use('/api/admin', adminRouter);
 
   // Versioned application API.
   app.use('/api/v1', apiRouter);

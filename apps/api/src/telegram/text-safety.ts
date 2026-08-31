@@ -81,6 +81,64 @@ export function isApplyUrlCandidate(urlString: string): boolean {
   return isSafeUrl(urlString) && !isChatUrl(urlString);
 }
 
+/**
+ * Hosts whose links grow an audience rather than accept an application.
+ * LinkedIn is deliberately absent: `linkedin.com/jobs/view/…` is a real posting,
+ * so it is judged by path below instead of by host.
+ */
+const SOCIAL_HOSTS = new Set([
+  'instagram.com',
+  'instagr.am',
+  'facebook.com',
+  'm.facebook.com',
+  'fb.com',
+  'fb.me',
+  'youtube.com',
+  'youtu.be',
+  'twitter.com',
+  'x.com',
+  'threads.net',
+  'discord.gg',
+  'discord.com',
+  'reddit.com',
+  'pinterest.com',
+  'snapchat.com',
+  'sharechat.com',
+]);
+
+/** LinkedIn paths that are a page or a profile rather than a posting. */
+const LINKEDIN_NON_JOB_PATH = /^\/(?:company|in|school|showcase|feed|groups|newsletters)\//i;
+
+/**
+ * True for social/profile links: an Instagram page, a YouTube channel, a
+ * LinkedIn company page. Those are promotion, never an application form.
+ */
+export function isSocialUrl(urlString: string): boolean {
+  try {
+    const url = new URL(urlString);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+
+    if (SOCIAL_HOSTS.has(host)) return true;
+
+    if (host === 'linkedin.com' || host.endsWith('.linkedin.com')) {
+      return LINKEDIN_NON_JOB_PATH.test(url.pathname);
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True for any link that exists to gather followers — a Telegram/WhatsApp chat
+ * or a social page. These are stripped from post text and can never become an
+ * applyUrl.
+ */
+export function isPromotionalUrl(urlString: string): boolean {
+  return isChatUrl(urlString) || isSocialUrl(urlString);
+}
+
 /** Every http(s) URL in the text, in order of appearance. */
 export function extractUrls(text: string): string[] {
   return text.match(URL_REGEX)?.map((url) => url.trim()) ?? [];

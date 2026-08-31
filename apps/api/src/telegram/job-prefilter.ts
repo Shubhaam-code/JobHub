@@ -22,7 +22,7 @@ const JOB_SIGNAL_REGEX = new RegExp(
     'opportunit(?:y|ies)',
     'job[s]?',
     'work\\s*from\\s*home',
-    'wfh',
+    '\\bwfh\\b',
     'walk[\\s-]*in',
     'placement',
     'off[\\s-]*campus',
@@ -56,10 +56,11 @@ const JOB_SIGNAL_REGEX = new RegExp(
     'specialist',
     'technician',
     'manager',
-    'sde',
-    'swe',
-    'sdet',
-    'qa',
+    // `\d?` so "SDE1"/"SWE2" still register.
+    '\\bsde\\d?\\b',
+    '\\bswe\\d?\\b',
+    '\\bsdet\\b',
+    '\\bqa\\b',
     'devops',
     'full\\s*stack',
     'frontend',
@@ -70,8 +71,8 @@ const JOB_SIGNAL_REGEX = new RegExp(
     'eligible',
     'stipend',
     'salary',
-    'ctc',
-    'lpa',
+    '\\bctc\\b',
+    '\\blpa\\b',
     'experience\\s*:',
     'last\\s*date',
     'deadline',
@@ -94,14 +95,20 @@ const JOB_SIGNAL_REGEX = new RegExp(
     'node',
     'angular',
     'sql',
-    // Indian job market specific
-    'b\\.?tech',
-    'm\\.?tech',
-    'b\\.?e',
-    'b\\.?sc',
-    'mca',
-    'bca',
-    'mba',
+    // Indian job market specific.
+    //
+    // Acronyms and degree abbreviations are the one group that needs \b anchors:
+    // unanchored, "b.?e" and "b.?sc" both match inside "Subscribe", so a pure
+    // "Subscribe to t.me/..." promo would score a job signal and buy an LLM call.
+    // Longer words above can stay unanchored — matching inside a longer word
+    // ("javascript", "internships") is the permissive behaviour we want.
+    '\\bb\\.?tech\\b',
+    '\\bm\\.?tech\\b',
+    '\\bb\\.?e\\b',
+    '\\bb\\.?sc\\b',
+    '\\bmca\\b',
+    '\\bbca\\b',
+    '\\bmba\\b',
     'notification',
     'requirement[s]?',
     'qualification[s]?',
@@ -114,8 +121,10 @@ const JOB_SIGNAL_REGEX = new RegExp(
     'urgent',
     'immediate',
     'walk\\s*-?\\s*in',
-    'alert',
+    // Qualified only: a bare "alert" also matches "Follow us for instant alerts",
+    // which is promotion, not an opportunity.
     'hiring\\s*alert',
+    'job\\s*alert',
     'experience[d]?',
   ].join('|'),
   'i',

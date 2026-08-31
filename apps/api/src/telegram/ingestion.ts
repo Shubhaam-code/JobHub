@@ -1,21 +1,27 @@
 /**
- * Per-message ingestion pipeline.
+ * Per-message ingestion — the half that runs at Telegram's pace.
  *
- * pre-filter → LLM classify → sanitize/ground → validate → deduplicate/insert → log
+ * Telegram → normalize + sanitize → deduplicate → persistent queue
  *
- * Channel-agnostic: the same path runs for every entry in TELEGRAM_CHANNELS, so
- * adding a channel needs no code change.
+ * Deliberately free of LLM calls. The listener used to block on classification,
+ * so a slow, unavailable or rate-limited provider stalled ingestion and messages
+ * could be lost. Now the message is cleaned, its apply URL extracted and the
+ * whole thing durably queued in a few milliseconds; the LLM worker drains the
+ * queue independently (see `src/queue/worker.ts`).
+ *
+ * Channel-agnostic: the same path runs for every active channel, so adding a
+ * channel needs no code change.
  */
 
 import { logger } from '../lib/logger.js';
-import { broadcastNewJob } from '../lib/socket.js';
-import { JobModel } from '../models/job.model.js';
-import { formatJob, type MongoJobDoc, type PublicJob } from '../routes/jobs.route.js';
+import { enqueueMessage } from '../queue/ingest-queue.js';
+import { isChannelIngestionEnabled, recordChannelActivity } from './channel-registry.js';
 import { classifyJobPost, type ClassifiedJob } from './job-classifier.js';
 import { prefilterMessage } from './job-prefilter.js';
 import { validateClassifiedJob } from './job-validator.js';
+import { normalizeMessage } from './normalize.js';
 
-export type IngestionOutcome = 'inserted' | 'duplicate' | 'skipped' | 'error';
+export type IngestionOutcome = 'queued' | 'duplicate' | 'skipped' | 'error';
 
 export interface IngestionInput {
   text: string;
@@ -23,13 +29,16 @@ export interface IngestionInput {
   /** Unix timestamp (seconds) from Telegram. */
   date: number;
   channelUsername: string;
+  /** Numeric Telegram channel ID, when the caller has resolved the entity. */
+  channelId?: string | null;
 }
 
 export interface IngestionResult {
   outcome: IngestionOutcome;
   messageId: number;
   reason?: string;
-  job?: PublicJob;
+  /** Queue document id, set when this call enqueued the message. */
+  queueJobId?: string;
 }
 
 /**
@@ -42,10 +51,18 @@ export interface IngestionResult {
 export type EvaluationResult =
   | { verdict: 'job'; job: ClassifiedJob }
   | { verdict: 'not-job'; reason: string }
-  | { verdict: 'unavailable'; reason: string };
+  | {
+      verdict: 'unavailable';
+      reason: string;
+      /** Set when the provider returned 429 — the queue should retry. */
+      rateLimited?: boolean;
+      retryAfterMs?: number;
+    };
 
-/** MongoDB duplicate key error code. */
-const DUPLICATE_KEY_ERROR_CODE = 11000;
+export interface EvaluateOptions {
+  /** Forwarded to the LLM call; the worker passes 1 and owns the retry itself. */
+  maxAttempts?: number;
+}
 
 function buildMessageUrl(channelUsername: string, messageId: number): string {
   return `https://t.me/${channelUsername}/${messageId}`;
@@ -54,10 +71,13 @@ function buildMessageUrl(channelUsername: string, messageId: number): string {
 /**
  * Runs the classification half of the pipeline: pre-filter, LLM, validation.
  *
- * Shared by live ingestion, the backfill and the stored-data cleanup so all
- * three judge a post by exactly the same rules.
+ * Shared by the queue worker and the stored-data cleanup so both judge a post by
+ * exactly the same rules. Expects text that has already been normalized.
  */
-export async function evaluateJobPost(text: string): Promise<EvaluationResult> {
+export async function evaluateJobPost(
+  text: string,
+  options: EvaluateOptions = {},
+): Promise<EvaluationResult> {
   if (!text || text.trim().length === 0) {
     return { verdict: 'not-job', reason: 'no text' };
   }
@@ -69,10 +89,20 @@ export async function evaluateJobPost(text: string): Promise<EvaluationResult> {
   }
 
   // 2. LLM classification + extraction (structured JSON, never free-form).
-  const classification = await classifyJobPost(text);
+  const classification = await classifyJobPost(
+    text,
+    options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {},
+  );
   if (!classification.ok) {
     // A provider/parse failure is not a verdict — the post stays undecided.
-    return { verdict: 'unavailable', reason: classification.reason };
+    return {
+      verdict: 'unavailable',
+      reason: classification.reason,
+      ...(classification.rateLimited ? { rateLimited: true } : {}),
+      ...(classification.retryAfterMs !== undefined
+        ? { retryAfterMs: classification.retryAfterMs }
+        : {}),
+    };
   }
 
   // 3. Deterministic validation has the final word.
@@ -85,78 +115,79 @@ export async function evaluateJobPost(text: string): Promise<EvaluationResult> {
 }
 
 /**
- * Processes a single Telegram message through the full ingestion pipeline.
+ * Normalizes one Telegram message and puts it on the durable queue.
  *
- * Errors are caught per-message so one malformed post cannot crash the listener.
+ * Fast and LLM-free by design: whatever the provider is doing, the message is
+ * safely persisted before this returns. Errors are caught per-message so one
+ * malformed post cannot crash the listener.
  */
 export async function ingestMessage(input: IngestionInput): Promise<IngestionResult> {
   const { text, messageId, date, channelUsername } = input;
+  const channelId = input.channelId ?? null;
 
   // Every log line names its channel so multi-channel activity stays readable.
   const ref = `[@${channelUsername} msg ${messageId}]`;
 
   try {
+    logger.debug(`${ref} telegram message received`);
+
+    // An admin-paused channel stops here: nothing is normalized, queued or
+    // classified. Existing jobs and already-queued messages are untouched, so
+    // resuming continues exactly where it left off.
+    if (!(await isChannelIngestionEnabled(channelUsername))) {
+      logger.debug(`${ref} skipped → channel paused`);
+      return { outcome: 'skipped', messageId, reason: 'channel paused' };
+    }
+
     if (!text || text.trim().length === 0) {
       logger.debug(`${ref} skipped → no text`);
       return { outcome: 'skipped', messageId, reason: 'no text' };
     }
 
-    const evaluation = await evaluateJobPost(text);
+    // Promotion is stripped and the apply URL captured here, before anything
+    // reaches the model or the user-facing text.
+    const normalized = normalizeMessage(text);
 
-    if (evaluation.verdict !== 'job') {
-      // 'unavailable' is logged at info: a key/provider problem should be visible.
-      const line = `${ref} skipped → ${evaluation.reason}`;
-      if (evaluation.verdict === 'unavailable') {
-        logger.warn(line);
-      } else {
-        logger.debug(line);
-      }
-      return { outcome: 'skipped', messageId, reason: evaluation.reason };
+    if (normalized.cleanedText.trim().length === 0) {
+      logger.debug(`${ref} skipped → nothing left after removing promotion`);
+      return { outcome: 'skipped', messageId, reason: 'promotion only' };
     }
 
-    const { job } = evaluation;
+    logger.debug(
+      `${ref} message normalized removedLines=${normalized.removedLines} removedUrls=${normalized.removedUrls.length} applyUrl=${normalized.applyUrl ? 'yes' : 'none'}`,
+    );
 
-    const doc = {
-      company: job.company,
-      role: job.role,
-      batch: job.batch,
-      applyUrl: job.applyUrl,
-      location: job.location,
-      employmentType: job.employmentType,
+    const result = await enqueueMessage({
       source: 'telegram',
       telegramChannel: channelUsername,
+      telegramChannelId: channelId,
       telegramMessageId: messageId,
       telegramMessageUrl: buildMessageUrl(channelUsername, messageId),
-      originalText: text,
       postedAt: new Date(date * 1000),
-    };
+      rawMessage: text,
+      cleanedText: normalized.cleanedText,
+      applyUrl: normalized.applyUrl,
+    });
 
-    // The unique (telegramChannel, telegramMessageId) index handles dedup.
-    const created = await JobModel.create(doc);
-    const publicJob = formatJob(created.toObject() as unknown as MongoJobDoc);
-
-    broadcastNewJob(publicJob);
-
-    logger.info(
-      `${ref} job detected → ${job.company ?? '(no company)'} / ${job.role ?? '(no role)'}`,
-    );
-    return { outcome: 'inserted', messageId, job: publicJob };
-  } catch (error: unknown) {
-    // Duplicate key on the compound index → idempotent, not an error.
-    if (isDuplicateKeyError(error)) {
-      logger.debug(`${ref} already processed (duplicate)`);
+    if (result.outcome === 'duplicate') {
+      logger.debug(`${ref} duplicate detected → already queued, ignoring`);
       return { outcome: 'duplicate', messageId };
     }
 
+    // Reporting only — the registry swallows its own errors, so this cannot
+    // affect the outcome of an ingest.
+    await recordChannelActivity({ username: channelUsername, messageId });
+
+    logger.info(`${ref} job added to queue queueJobId=${result.queueJobId ?? 'unknown'}`);
+
+    return {
+      outcome: 'queued',
+      messageId,
+      ...(result.queueJobId !== null ? { queueJobId: result.queueJobId } : {}),
+    };
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`${ref} error → ${message}`);
     return { outcome: 'error', messageId, reason: message };
   }
-}
-
-function isDuplicateKeyError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-  // Mongoose wraps the MongoDB driver error.
-  const asAny = error as Record<string, unknown>;
-  return asAny['code'] === DUPLICATE_KEY_ERROR_CODE;
 }

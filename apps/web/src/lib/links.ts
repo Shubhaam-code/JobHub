@@ -13,8 +13,18 @@ const TOKEN_PATTERN =
 
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 
-/** Sentence punctuation that sits after a link rather than inside it. */
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"“”’]+$/;
+/**
+ * Zero-width and bidi formatting codepoints. Posts forwarded through Telegram
+ * carry these next to a link — a word joiner, or the object-replacement char
+ * left where an embedded preview used to be. `\s` does not cover them and
+ * `TOKEN_PATTERN` does not exclude them, so a URL can absorb one and the href
+ * ends up with `%E2%81%A0` glued to the path, pointing at nothing.
+ */
+const INVISIBLE =
+  "\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\uFEFF\\uFFF9-\\uFFFC";
+
+/** Sentence punctuation and invisible marks that sit after a link, not inside it. */
+const TRAILING_PUNCTUATION = new RegExp(`[.,;:!?)\\]}'"“”’${INVISIBLE}]+$`);
 
 export type LinkKind = "url" | "email";
 

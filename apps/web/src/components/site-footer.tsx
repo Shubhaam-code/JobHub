@@ -20,6 +20,7 @@ export function SiteFooter() {
                 alt=""
                 width={1312}
                 height={1199}
+                sizes="48px"
                 className="h-11 w-auto shrink-0"
               />
               <span className="font-heading text-[17px] leading-none font-semibold tracking-snug">

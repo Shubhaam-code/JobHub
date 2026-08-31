@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Lexend, Source_Sans_3 } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
-import { SiteFooter } from "@/components/site-footer";
-import { SiteHeader } from "@/components/site-header";
+import { CLERK_ENABLED } from "@/lib/clerk";
 
 /* "Corporate Trust" pairing from ui-ux-pro-max. Lexend is designed for reading
    proficiency, which suits a page whose job is scanning listings quickly. */
@@ -23,6 +23,11 @@ export const metadata: Metadata = {
   title: "JobFeed — jobs and internships for your batch",
   description:
     "JobFeed gathers jobs and internships from public channels and lists them by role, batch and location, so you can see what is actually open to you in one place.",
+  /* Points at the same public/image.png the header and footer render, so the tab
+     icon is the real mark rather than the create-next-app placeholder that used
+     to sit at app/favicon.ico. Declared here instead of copying the file to
+     app/icon.png so the logo lives in exactly one place. */
+  icons: { icon: "/image.png" },
 };
 
 export const viewport: Viewport = {
@@ -33,16 +38,52 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${lexend.variable} ${sourceSans.variable} h-full antialiased`}>
-      {/* Chrome lives here rather than in each page. It was previously assembled
-          inside the homepage, which left /jobs/[id] with no header, no nav and no
-          footer — the detail view lost the product entirely. One shell means both
-          routes get the same brand, the same skip link and the same footer. */}
+      {/* Header and footer used to be assembled here, which gave them to every
+          route — including the sign-in pages, where the nav points at feed
+          sections that are not on the page. They now live in `(app)/layout.tsx`,
+          so this file is down to what genuinely is global: the document, the
+          fonts and the Clerk session.
+
+          `ClerkProvider` goes inside <body>, not around <html>: it renders a
+          Suspense boundary and its own scripts, and hoisting it above <html>
+          leaves Next unable to stream the document shell.
+
+          Rendered conditionally so the rest of the project still runs without
+          Clerk keys in development. The flag comes from a NEXT_PUBLIC_ variable,
+          which is inlined identically on the server and in the browser, so both
+          sides agree on the shape of this tree and hydration is unaffected. A
+          production build cannot reach the `false` branch — `lib/clerk.ts` throws
+          rather than let one be built. */}
       <body className="flex min-h-full flex-col">
-        <SiteHeader />
-        <main id="main" className="flex-1">
-          {children}
-        </main>
-        <SiteFooter />
+        {CLERK_ENABLED ? (
+          <ClerkProvider
+            /* Signing out lands back on the landing page rather than on a route
+               the proxy would immediately bounce, so there is one navigation
+               instead of two. Set on the provider so the avatar menu and any
+               sign-out control agree without repeating themselves. */
+            afterSignOutUrl="/welcome"
+            /* Enough to stop Clerk's widget looking bolted on: it inherits the
+               brand colour, the corner radius and the body face from the same
+               tokens as everything else. Only variables, no element overrides —
+               restyling Clerk's internals would break on their next release. */
+            appearance={{
+              variables: {
+                colorPrimary: "#0369a1",
+                colorPrimaryForeground: "#ffffff",
+                colorForeground: "#0f172a",
+                colorMutedForeground: "#475569",
+                colorBorder: "#e2e8f0",
+                colorRing: "#0369a1",
+                borderRadius: "0.625rem",
+                fontFamily: "var(--font-source-sans)",
+              },
+            }}
+          >
+            {children}
+          </ClerkProvider>
+        ) : (
+          children
+        )}
       </body>
     </html>
   );

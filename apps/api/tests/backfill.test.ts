@@ -55,7 +55,7 @@ function createIngest(outcomes: Partial<Record<number, IngestionOutcome>> = {}) 
 
   const ingest = vi.fn(async (input: IngestionInput) => {
     calls.push(input);
-    return { outcome: outcomes[input.messageId] ?? 'inserted', messageId: input.messageId };
+    return { outcome: outcomes[input.messageId] ?? 'queued', messageId: input.messageId };
   });
 
   return { ingest, calls };
@@ -84,7 +84,7 @@ describe('runBackfill', () => {
 
     expect(calls.map((call) => call.messageId)).toEqual([299, 300]);
     expect(summary.eligible).toBe(2);
-    expect(summary.inserted).toBe(2);
+    expect(summary.queued).toBe(2);
     expect(summary.cutoff).toEqual(new Date((NOW_SECONDS - 7 * DAY) * 1000));
   });
 
@@ -126,6 +126,7 @@ describe('runBackfill', () => {
       messageId: 500,
       date: NOW_SECONDS - DAY,
       channelUsername: CHANNEL,
+      channelId: null,
     });
   });
 
@@ -138,7 +139,7 @@ describe('runBackfill', () => {
 
     expect(ingest).not.toHaveBeenCalled();
     expect(summary.eligible).toBe(0);
-    expect(summary.inserted).toBe(0);
+    expect(summary.queued).toBe(0);
     expect(summary.fetched).toBe(1);
   });
 
@@ -146,7 +147,7 @@ describe('runBackfill', () => {
     const messages: FakeMessage[] = [post(304, 1), post(303, 2), post(302, 3), post(301, 4)];
     const { source } = createSource(messages);
     const { ingest, calls } = createIngest({
-      301: 'inserted',
+      301: 'queued',
       302: 'duplicate',
       303: 'skipped',
       304: 'error',
@@ -157,7 +158,7 @@ describe('runBackfill', () => {
     expect(calls).toHaveLength(4);
     expect(summary).toMatchObject({
       eligible: 4,
-      inserted: 1,
+      queued: 1,
       duplicates: 1,
       skipped: 1,
       errors: 1,
@@ -172,7 +173,7 @@ describe('runBackfill', () => {
     const summary = await run(ingest, source);
 
     expect(summary.duplicates).toBe(2);
-    expect(summary.inserted).toBe(0);
+    expect(summary.queued).toBe(0);
   });
 
   it('8. skips media-only posts with no caption instead of inventing data', async () => {
@@ -185,7 +186,7 @@ describe('runBackfill', () => {
     // Reaches the pipeline with empty text, which reports it as skipped.
     expect(calls.find((call) => call.messageId === 300)?.text).toBe('');
     expect(summary.skipped).toBe(1);
-    expect(summary.inserted).toBe(1);
+    expect(summary.queued).toBe(1);
   });
 
   it('9. reports a FLOOD_WAIT and stops instead of retrying', async () => {
@@ -200,7 +201,7 @@ describe('runBackfill', () => {
     expect(summary.floodWaitSeconds).toBe(42);
     expect(summary.errors).toBe(0);
     // Messages collected before the rate limit are still ingested.
-    expect(summary.inserted).toBe(2);
+    expect(summary.queued).toBe(2);
   });
 
   it('10. records a fetch failure and still ingests what it collected', async () => {
@@ -214,7 +215,7 @@ describe('runBackfill', () => {
 
     expect(summary.fetchError).toBe('connection reset');
     expect(summary.errors).toBe(1);
-    expect(summary.inserted).toBe(1);
+    expect(summary.queued).toBe(1);
   });
 
   it('11. keeps going when ingestion throws unexpectedly', async () => {
@@ -223,14 +224,14 @@ describe('runBackfill', () => {
 
     const ingest = vi.fn(async (input: IngestionInput) => {
       if (input.messageId === 299) throw new Error('mongo unavailable');
-      return { outcome: 'inserted' as IngestionOutcome, messageId: input.messageId };
+      return { outcome: 'queued' as IngestionOutcome, messageId: input.messageId };
     });
 
     const summary = await run(ingest, source);
 
     expect(ingest).toHaveBeenCalledTimes(2);
     expect(summary.errors).toBe(1);
-    expect(summary.inserted).toBe(1);
+    expect(summary.queued).toBe(1);
   });
 
   it('12. honours a custom window and ignores unusable entries', async () => {

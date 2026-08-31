@@ -16,6 +16,11 @@ import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { isLlmConfigured, llmModelName } from '../llm/client.js';
 import { runBackfill, type BackfillSummary } from './backfill.js';
+import {
+  ensureConfiguredChannels,
+  isChannelIngestionEnabled,
+  registerResolvedChannel,
+} from './channel-registry.js';
 import { resolveConfiguredChannels } from './channels.js';
 import type { TelegramClientHandle } from './client.js';
 import { ingestMessage } from './ingestion.js';
@@ -30,18 +35,21 @@ export interface ListenerHandle {
 /**
  * Starts the new-message listener.
  *
- * 1. Resolves all configured channels → caches numeric IDs.
+ * 1. Resolves all configured channels → caches numeric IDs, records the registry.
  * 2. Registers a NewMessage handler that filters by cached IDs.
  * 3. Backfills the last 7 days for each channel through the same pipeline.
  * 4. Returns a handle whose `stop()` tears everything down.
+ *
+ * Ingestion only normalizes and enqueues, so the listener keeps up with Telegram
+ * regardless of what the LLM is doing.
  */
 export async function startListener(handle: TelegramClientHandle): Promise<ListenerHandle> {
   const { client } = handle;
 
   if (!isLlmConfigured()) {
     logger.warn(
-      '[listener] GEMINI_API_KEY is not set — posts cannot be classified, so nothing will be ' +
-        'stored. Set it in apps/api/.env.',
+      '[listener] GEMINI_API_KEY is not set — messages will still be queued, but nothing can be ' +
+        'classified or stored until it is. Set it in apps/api/.env.',
     );
   } else {
     logger.info(`[listener] Classifier model: ${llmModelName()}`);
@@ -49,10 +57,23 @@ export async function startListener(handle: TelegramClientHandle): Promise<Liste
 
   // ── Resolve all configured channels ──────────────────────────────────────
 
+  // Registered first, so the admin dashboard lists a channel even if Telegram
+  // cannot resolve it right now. Never re-enables an admin-paused channel.
+  await ensureConfiguredChannels();
+
   const { resolved } = await resolveConfiguredChannels(client);
 
   if (resolved.length === 0) {
     throw new Error('[listener] None of the configured channels could be resolved.');
+  }
+
+  // Records numeric IDs and titles so the registry can describe each channel.
+  for (const channel of resolved) {
+    await registerResolvedChannel({
+      username: channel.username,
+      title: channel.title,
+      telegramId: channel.id.toString(),
+    });
   }
 
   // Concise startup summary. Never logs credentials — usernames and titles only.
@@ -96,6 +117,7 @@ export async function startListener(handle: TelegramClientHandle): Promise<Liste
         messageId: message.id,
         date: message.date,
         channelUsername: channel.username,
+        channelId: channel.id.toString(),
       });
     } catch (error: unknown) {
       if (error instanceof errors.FloodWaitError) {
@@ -118,11 +140,19 @@ export async function startListener(handle: TelegramClientHandle): Promise<Liste
   const backfillResults: BackfillSummary[] = [];
 
   for (const channel of resolved) {
+    // A paused channel is not walked at all. The per-message check already
+    // blocks its ingestion, so this only avoids a pointless history read.
+    if (!(await isChannelIngestionEnabled(channel.username))) {
+      logger.info(`[listener] @${channel.username} is paused — backfill skipped.`);
+      continue;
+    }
+
     try {
       const summary = await runBackfill({
         client,
         entity: channel.entity,
         channelUsername: channel.username,
+        channelId: channel.id.toString(),
       });
       backfillResults.push(summary);
     } catch (error: unknown) {

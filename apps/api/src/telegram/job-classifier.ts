@@ -28,7 +28,16 @@ export interface ClassifiedJob {
   employmentType: string | null;
 }
 
-export type ClassificationResult = { ok: true; job: ClassifiedJob } | { ok: false; reason: string };
+export type ClassificationResult =
+  | { ok: true; job: ClassifiedJob }
+  | {
+      ok: false;
+      reason: string;
+      /** True when the provider returned 429 — worth retrying later, not dropping. */
+      rateLimited?: boolean;
+      /** Wait the provider asked for, when it supplied one. */
+      retryAfterMs?: number;
+    };
 
 /** Closed set for employmentType — the one field the model may normalise. */
 const EMPLOYMENT_TYPES = [
@@ -234,14 +243,27 @@ export function sanitizeClassification(
   };
 }
 
+export interface ClassifyOptions {
+  /**
+   * Attempts inside the LLM call. The queue worker passes 1 so a rate limit is
+   * reported back immediately and the durable queue owns the retry, instead of
+   * the call sleeping and blocking the worker.
+   */
+  maxAttempts?: number;
+}
+
 /**
  * Classifies one Telegram post and extracts its fields.
  *
  * Never throws. A missing API key, a provider failure, a timeout or unusable
  * output all come back as `{ ok: false, reason }` so the caller can skip the
- * message and log a single line.
+ * message and log a single line. A 429 additionally sets `rateLimited`, which is
+ * how the queue tells "try again later" apart from "this will never work".
  */
-export async function classifyJobPost(text: string): Promise<ClassificationResult> {
+export async function classifyJobPost(
+  text: string,
+  options: ClassifyOptions = {},
+): Promise<ClassificationResult> {
   if (!isLlmConfigured()) {
     return { ok: false, reason: 'LLM not configured (GEMINI_API_KEY is not set)' };
   }
@@ -250,10 +272,16 @@ export async function classifyJobPost(text: string): Promise<ClassificationResul
     systemInstruction: SYSTEM_INSTRUCTION,
     prompt: buildPrompt(text),
     schema: CLASSIFICATION_SCHEMA,
+    ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
   });
 
   if (!response.ok) {
-    return { ok: false, reason: response.reason };
+    return {
+      ok: false,
+      reason: response.reason,
+      ...(response.rateLimited ? { rateLimited: true } : {}),
+      ...(response.retryAfterMs !== undefined ? { retryAfterMs: response.retryAfterMs } : {}),
+    };
   }
 
   return sanitizeClassification(response.data, text);

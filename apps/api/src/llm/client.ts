@@ -5,17 +5,28 @@
  * return parsed JSON that conforms to the schema — or a reason why it could not.
  * No framework, no agents, no chains.
  *
- * Handles 429 rate-limit responses by waiting the Gemini-supplied retryDelay
- * before retrying (up to MAX_ATTEMPTS total). All other failures are returned
- * as { ok: false } so no caller has to try/catch.
+ * Every call is throttled by `llmRateLimiter` first. A 429 is reported back to
+ * the caller as `{ rateLimited: true, retryAfterMs }` so the ingest queue can
+ * park the message and retry it later; callers that want the old in-process
+ * wait-and-retry behaviour get it by leaving `maxAttempts` unset.
  */
 
 import { GoogleGenAI } from '@google/genai';
 
 import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
+import { llmRateLimiter } from './rate-limiter.js';
 
-export type StructuredResult<T> = { ok: true; data: T } | { ok: false; reason: string };
+export type StructuredResult<T> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      reason: string;
+      /** True when the provider refused with a 429. The failure is transient. */
+      rateLimited?: boolean;
+      /** Provider-supplied wait before retrying, when it gave one. */
+      retryAfterMs?: number;
+    };
 
 /** Plain JSON Schema — the shape both call paths below accept. */
 export type JsonSchema = Record<string, unknown>;
@@ -26,7 +37,22 @@ export interface StructuredRequest {
   schema: JsonSchema;
   /** Caps a single attempt. Defaults to env.LLM_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * Output ceiling for this request. Defaults to MAX_OUTPUT_TOKENS, which suits
+   * the short classification object; a request that returns several arrays
+   * (resume parsing) needs more room or the JSON is truncated mid-object.
+   */
+  maxOutputTokens?: number;
+  /**
+   * Attempts inside this call. Defaults to MAX_ATTEMPTS.
+   *
+   * Pass 1 when a durable queue owns the retry: the call then returns
+   * immediately with `rateLimited`/`retryAfterMs` instead of sleeping, leaving
+   * the worker free to process other messages.
+   */
+  maxAttempts?: number;
 }
+
 
 /**
  * Up to 4 attempts on rate-limit or transient errors.
@@ -96,32 +122,58 @@ function modelSupportsThinking(modelName: string): boolean {
 }
 
 /**
- * Extracts the retry delay in milliseconds from a Gemini 429 error response.
- * The API includes a RetryInfo detail with a "Xs" retryDelay string.
- * Falls back to DEFAULT_RETRY_DELAY_MS if not parseable.
+ * Reads the provider's requested wait, in milliseconds, or null when it did not
+ * give one. Recognises Gemini's RetryInfo (`"retryDelay": "59s"`) and an HTTP
+ * `Retry-After` echoed into the error text, in seconds or as a date.
+ *
+ * A 1s buffer is added so the retry lands just after the window opens rather
+ * than exactly on the boundary, where it would be refused again.
+ */
+export function parseRetryDelayMs(error: unknown, nowMs: number = Date.now()): number | null {
+  const text = errorText(error);
+
+  const retryDelay = /"retryDelay":\s*"(\d+(?:\.\d+)?)s"/.exec(text);
+  const seconds = retryDelay?.[1];
+  if (seconds !== undefined) {
+    return Math.ceil(parseFloat(seconds) * 1000) + 1_000;
+  }
+
+  const retryAfter = /retry[-_]?after"?\s*[:=]\s*"?(\d+(?:\.\d+)?)"?/i.exec(text);
+  const afterSeconds = retryAfter?.[1];
+  if (afterSeconds !== undefined) {
+    return Math.ceil(parseFloat(afterSeconds) * 1000) + 1_000;
+  }
+
+  const retryAfterDate = /retry[-_]?after"?\s*[:=]\s*"([^"]+)"/i.exec(text)?.[1];
+  if (retryAfterDate !== undefined) {
+    const parsed = Date.parse(retryAfterDate);
+    if (!Number.isNaN(parsed) && parsed > nowMs) {
+      return parsed - nowMs + 1_000;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extracts the retry delay in milliseconds from a Gemini 429 error response,
+ * falling back to DEFAULT_RETRY_DELAY_MS when the response carried none.
  */
 function extractRetryDelayMs(error: unknown): number {
-  try {
-    const text = errorText(error);
-    // "retryDelay\":\"59s\"" or "retryDelay":"59.123s"
-    const match = /"retryDelay":\s*"(\d+(?:\.\d+)?)s"/.exec(text);
-    if (match) {
-      const seconds = parseFloat(match[1]);
-      // Add 1s buffer to the API-supplied delay to avoid immediate re-rejection.
-      return Math.ceil(seconds * 1000) + 1_000;
-    }
-  } catch {
-    // fallthrough
-  }
-  return DEFAULT_RETRY_DELAY_MS;
+  return parseRetryDelayMs(error) ?? DEFAULT_RETRY_DELAY_MS;
 }
 
 /**
  * True when the error is a Gemini 429 rate-limit response (RESOURCE_EXHAUSTED).
  */
-function isRateLimitError(error: unknown): boolean {
+export function isRateLimitError(error: unknown): boolean {
   const text = errorText(error);
-  return text.includes('"code":429') || text.includes('"status":"RESOURCE_EXHAUSTED"');
+  return (
+    text.includes('"code":429') ||
+    text.includes('"status":"RESOURCE_EXHAUSTED"') ||
+    /\b429\b/.test(text) ||
+    /rate\s*limit/i.test(text)
+  );
 }
 
 /**
@@ -148,7 +200,7 @@ async function callProvider(
           responseMimeType: 'application/json',
           responseJsonSchema: request.schema,
           temperature: 0,
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          maxOutputTokens: request.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
           // Only send thinkingConfig for gemini-2.5-* models.
           // 3.5-flash-lite and 2.0 reject this field with INVALID_ARGUMENT.
           ...(modelSupportsThinking(env.GEMINI_MODEL)
@@ -172,7 +224,10 @@ async function callProvider(
  * error, timeout, empty response, unparseable JSON — so no caller has to
  * try/catch and no malformed output can reach the database.
  *
- * On 429 rate-limit responses, waits the Gemini-supplied retryDelay and retries.
+ * Each attempt waits for a slot from `llmRateLimiter` first. A 429 is recorded
+ * on the limiter (pausing every other caller for the provider's cool-down) and
+ * reported back as `rateLimited` with the wait the provider asked for. Callers
+ * that pass `maxAttempts: 1` get that report instead of an in-process sleep.
  */
 export async function generateStructured<T>(
   request: StructuredRequest,
@@ -184,18 +239,35 @@ export async function generateStructured<T>(
   }
 
   const timeoutMs = request.timeoutMs ?? env.LLM_TIMEOUT_MS;
-  let lastReason = 'unknown LLM failure';
+  const maxAttempts = Math.max(1, request.maxAttempts ?? MAX_ATTEMPTS);
+  let lastFailure: StructuredResult<T> = { ok: false, reason: 'unknown LLM failure' };
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let raw: string;
+
+    // Throttle before the request rather than after being refused.
+    const release = await llmRateLimiter.acquire();
 
     try {
       raw = await callProvider(client, request, timeoutMs);
     } catch (error: unknown) {
-      lastReason = `LLM request failed: ${errorText(error)}`;
+      const rateLimited = isRateLimitError(error);
+      const retryAfterMs = rateLimited ? parseRetryDelayMs(error) : null;
 
-      if (attempt < MAX_ATTEMPTS) {
-        if (isRateLimitError(error)) {
+      if (rateLimited) {
+        // Hold every other caller back too: the quota is per key, not per call.
+        llmRateLimiter.noteRateLimit(retryAfterMs ?? DEFAULT_RETRY_DELAY_MS);
+      }
+
+      lastFailure = {
+        ok: false,
+        reason: `LLM request failed: ${errorText(error)}`,
+        ...(rateLimited ? { rateLimited: true } : {}),
+        ...(retryAfterMs !== null ? { retryAfterMs } : {}),
+      };
+
+      if (attempt < maxAttempts) {
+        if (rateLimited) {
           const waitMs = extractRetryDelayMs(error);
           logger.info(
             `[llm] attempt ${attempt} hit rate limit — waiting ${Math.round(waitMs / 1000)}s before retry`,
@@ -203,23 +275,25 @@ export async function generateStructured<T>(
           await delay(waitMs);
         } else {
           // Transient error: short backoff, then retry.
-          logger.debug(`[llm] attempt ${attempt} failed (${lastReason}) — retrying`);
+          logger.debug(`[llm] attempt ${attempt} failed (${lastFailure.reason}) — retrying`);
           await delay(DEFAULT_RETRY_DELAY_MS);
         }
         continue;
       }
-      return { ok: false, reason: lastReason };
+      return lastFailure;
+    } finally {
+      release();
     }
 
     const text = stripCodeFence(raw);
 
     if (text.length === 0) {
-      lastReason = 'LLM returned an empty response';
-      if (attempt < MAX_ATTEMPTS) {
+      lastFailure = { ok: false, reason: 'LLM returned an empty response' };
+      if (attempt < maxAttempts) {
         await delay(DEFAULT_RETRY_DELAY_MS);
         continue;
       }
-      return { ok: false, reason: lastReason };
+      return lastFailure;
     }
 
     try {
@@ -231,5 +305,5 @@ export async function generateStructured<T>(
     }
   }
 
-  return { ok: false, reason: lastReason };
+  return lastFailure;
 }

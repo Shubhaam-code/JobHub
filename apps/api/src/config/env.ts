@@ -57,8 +57,78 @@ export const envSchema = z.object({
   // classified, so nothing is ingested.
   GEMINI_API_KEY: optionalValue,
   GEMINI_MODEL: z.string().trim().min(1).default('gemini-3.7-flash'),
+
+  // Resume parsing (Groq, OpenAI-compatible chat completions). A separate key
+  // from GEMINI_API_KEY on purpose: it has its own quota and is the only
+  // provider the resume flow uses. Server-side only — never sent to the browser.
+  GROQ_API_KEY: optionalValue,
+  /** Must be a Groq model that supports strict JSON-schema structured outputs. */
+  GROQ_MODEL: z.string().trim().min(1).default('openai/gpt-oss-20b'),
+
   /** Hard ceiling per LLM attempt, so ingestion never waits indefinitely. */
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(20_000),
+
+  // ── LLM throttling ──────────────────────────────────────────────────────
+  // The worker throttles itself BEFORE calling the provider, so the common case
+  // is never hitting a 429 at all. Tune these to the quota of your key.
+  /** Requests per rolling minute across the whole process. */
+  LLM_MAX_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(10),
+  /** How many LLM calls may be in flight at once. 1 = strictly serial. */
+  LLM_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(1),
+
+  // ── Ingest queue worker ─────────────────────────────────────────────────
+  /** How often the worker looks for claimable messages, in ms. */
+  QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().min(200).max(600_000).default(2_000),
+  /** Attempts before a message is parked in `failed` (dead-letter). */
+  QUEUE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(50).default(6),
+  /** First backoff step; each further attempt doubles it (5s → 10s → 20s …). */
+  QUEUE_RETRY_BASE_MS: z.coerce.number().int().min(100).max(600_000).default(5_000),
+  /** Ceiling on backoff, so a long outage never schedules a retry days out. */
+  QUEUE_RETRY_MAX_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(600_000),
+  /**
+   * A `processing` claim older than this is treated as abandoned (killed worker)
+   * and returned to `pending` on the next boot or sweep.
+   */
+  QUEUE_STALE_CLAIM_MS: z.coerce.number().int().min(10_000).max(86_400_000).default(300_000),
+  /** Set to "false" to keep ingesting into the queue without draining it. */
+  QUEUE_WORKER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+  // Accounts exist only to gate the admin dashboard. AUTH_SECRET signs the
+  // bearer tokens issued by POST /api/auth/login: changing it invalidates every
+  // outstanding token, which is the intended way to revoke them all.
+  AUTH_SECRET: optionalValue.pipe(z.string().min(16, 'must be at least 16 characters').optional()),
+  /** Lifetime of an issued token. Short by default — it only unlocks /admin. */
+  AUTH_TOKEN_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(12),
+  /**
+   * Optional first-admin bootstrap, applied idempotently at startup. Only ever
+   * creates a missing account — an existing user's password is never rewritten,
+   * so leaving these set does not undo a password change.
+   */
+  ADMIN_EMAIL: optionalValue.pipe(
+    z
+      .string()
+      .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'must be a valid email address')
+      .optional(),
+  ),
+  ADMIN_PASSWORD: optionalValue.pipe(z.string().min(8, 'must be at least 8 characters').optional()),
+
+  /** Largest resume PDF accepted by POST /api/v1/profile/resume. */
+  RESUME_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(10_000)
+    .max(20_000_000)
+    .default(5_000_000),
+  /**
+   * Lowest match score a job needs to be recommended at all. Raise it for
+   * stricter recommendations, lower it to see more. The per-dimension weights
+   * live in `src/recommendations/matching.ts`.
+   */
+  RECOMMENDATION_MIN_SCORE: z.coerce.number().int().min(0).max(100).default(50),
 });
 
 export type RawEnv = z.infer<typeof envSchema>;
@@ -68,9 +138,40 @@ export interface AppEnv extends RawEnv {
   corsOrigins: string[];
   /** TELEGRAM_CHANNELS split into individual channel usernames (without @). */
   telegramChannels: string[];
+  /** Key used to sign auth tokens — AUTH_SECRET, or a dev-only stand-in. */
+  authSecret: string;
   isDevelopment: boolean;
   isProduction: boolean;
   isTest: boolean;
+}
+
+/**
+ * Placeholder signing key used only when AUTH_SECRET is unset outside
+ * production. It is a fixed string so tokens survive a `tsx watch` restart
+ * during development; production refuses to boot without a real secret.
+ */
+const DEV_AUTH_SECRET = 'insecure-development-only-auth-secret';
+
+/**
+ * Resolves the token signing key. Missing AUTH_SECRET is fatal in production —
+ * a guessable key there would make admin tokens forgeable — and a warning
+ * everywhere else, so tests and local development need no configuration.
+ */
+function resolveAuthSecret(secret: string | undefined, nodeEnv: RawEnv['NODE_ENV']): string {
+  if (secret) return secret;
+
+  if (nodeEnv === 'production') {
+    throw new Error(
+      'Invalid environment configuration:\n  - AUTH_SECRET: required in production (min 16 characters)',
+    );
+  }
+
+  // console, not the logger: lib/logger.ts reads this module.
+  console.warn(
+    '[env] AUTH_SECRET is not set — using an insecure development key. Set AUTH_SECRET in apps/api/.env.',
+  );
+
+  return DEV_AUTH_SECRET;
 }
 
 /**
@@ -119,6 +220,7 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       .map((origin) => origin.trim())
       .filter((origin) => origin.length > 0),
     telegramChannels: parseChannelList(data.TELEGRAM_CHANNELS),
+    authSecret: resolveAuthSecret(data.AUTH_SECRET, data.NODE_ENV),
     isDevelopment: data.NODE_ENV === 'development',
     isProduction: data.NODE_ENV === 'production',
     isTest: data.NODE_ENV === 'test',

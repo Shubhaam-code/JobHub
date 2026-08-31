@@ -19,6 +19,11 @@
  * A post is deleted only on a definite "not a job" verdict. When the classifier
  * cannot reach a verdict (no API key, provider error, timeout), the document is
  * left untouched.
+ *
+ * Every kept post also has its sanitized text and apply URL rebuilt from
+ * `originalText` by the deterministic normalizer, so documents stored before the
+ * sanitizer existed pick up the current promotion filter and the exact published
+ * apply URL.
  */
 
 import { connectDatabase, disconnectDatabase, redactUri } from '../config/database.js';
@@ -27,6 +32,7 @@ import { logger } from '../lib/logger.js';
 import { isLlmConfigured, llmModelName } from '../llm/client.js';
 import { JobModel } from '../models/job.model.js';
 import { evaluateJobPost } from '../telegram/ingestion.js';
+import { normalizeMessage } from '../telegram/normalize.js';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const CONFIGURED_ONLY = process.argv.includes('--configured-only');
@@ -39,6 +45,7 @@ interface StoredJob {
   applyUrl: string | null;
   location?: string | null;
   employmentType?: string | null;
+  cleanedText?: string | null;
   telegramChannel: string;
   telegramMessageId: number;
   originalText: string;
@@ -113,10 +120,23 @@ async function main(): Promise<void> {
     const { job } = evaluation;
     const changes: Record<string, string | null> = {};
 
+    // Same rule as the queue worker: the apply URL comes from deterministic
+    // extraction over the raw post, and the model's value is only a fallback. On
+    // a document stored before that rule existed, this is what repairs a URL the
+    // model rewrote — and drops one that was only channel promotion.
+    const normalized = normalizeMessage(doc.originalText);
+    const resolvedApplyUrl = normalized.applyUrl ?? job.applyUrl;
+
     for (const field of EXTRACTED_FIELDS) {
-      const next = job[field];
+      const next = field === 'applyUrl' ? resolvedApplyUrl : job[field];
       const current = doc[field] ?? null;
       if (next !== current) changes[field] = next;
+    }
+
+    // Sanitized text is stored, not derived on read, so the promotion filter can
+    // improve without a second pass over the collection.
+    if (normalized.cleanedText !== (doc.cleanedText ?? null)) {
+      changes['cleanedText'] = normalized.cleanedText;
     }
 
     kept += 1;

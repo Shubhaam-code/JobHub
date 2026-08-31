@@ -1,14 +1,20 @@
 import { Router } from 'express';
 
 import { jobsRouter } from './jobs.route.js';
+import { profileRouter } from './profile.route.js';
 
 export const API_VERSION = 'v1';
 
 export const apiRouter = Router();
 
 apiRouter.use('/jobs', jobsRouter);
+apiRouter.use('/profile', profileRouter);
 
-/** Service index — lists what this version of the API currently exposes. */
+/**
+ * Service index — lists what this version of the API currently exposes.
+ * `/api/admin/*` is deliberately omitted: the index is public, and the admin
+ * surface is not advertised to anonymous callers.
+ */
 apiRouter.get('/', (_req, res) => {
   res.status(200).json({
     name: 'job-internship-aggregator-api',
@@ -17,10 +23,15 @@ apiRouter.get('/', (_req, res) => {
     endpoints: [
       'GET /health',
       'GET /health/ready',
+      'POST /api/auth/login',
+      'GET /api/auth/me',
       `GET /api/${API_VERSION}`,
       `GET /api/${API_VERSION}/jobs`,
-      `GET /api/${API_VERSION}/jobs/channels`,
+      `GET /api/${API_VERSION}/jobs/recommended`,
       `GET /api/${API_VERSION}/jobs/:id`,
+      `POST /api/${API_VERSION}/profile/resume`,
+      `GET /api/${API_VERSION}/profile`,
+      `PUT /api/${API_VERSION}/profile`,
     ],
   });
 });

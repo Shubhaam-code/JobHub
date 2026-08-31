@@ -6,7 +6,7 @@
  * Eligibility, Skills, Deadline, genuine job descriptions, and application emails).
  */
 
-import { resolveLink, type ResolvedLink } from "./links";
+import { type ResolvedLink } from "./links";
 import type { PublicJob } from "./api";
 
 /** Chat/social hostnames and domains that must never appear in visible job content. */
@@ -48,12 +48,20 @@ export function isPromotionalLine(line: string): boolean {
 
   // Pure handle or contains chat links
   if (/^@[\w]+$/.test(trimmed)) return true;
-  if (/^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog|wa\.me|chat\.whatsapp\.com)\/[^\s]+$/i.test(trimmed)) {
+  if (
+    /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog|wa\.me|chat\.whatsapp\.com)\/[^\s]+$/i.test(
+      trimmed,
+    )
+  ) {
     return true;
   }
 
   // Social link lines
-  if (/^(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|facebook\.com|youtube\.com|discord\.gg|twitter\.com|x\.com)\/[^\s]+$/i.test(trimmed)) {
+  if (
+    /^(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|facebook\.com|youtube\.com|discord\.gg|twitter\.com|x\.com)\/[^\s]+$/i.test(
+      trimmed,
+    )
+  ) {
     return true;
   }
 
@@ -67,22 +75,23 @@ export function isPromotionalLine(line: string): boolean {
 
 /** Strip promotional URLs, handles, and CTA fragments from a string. */
 export function sanitizeLineText(text: string): string {
-  let cleaned = text
-    .replace(CHAT_OR_SOCIAL_HOST_REGEX, "")
-    .replace(PROMO_HANDLE_REGEX, "")
-    .trim();
+  let cleaned = text.replace(CHAT_OR_SOCIAL_HOST_REGEX, "").replace(PROMO_HANDLE_REGEX, "").trim();
 
   // Strip leading decorative bullet symbols / emojis
   cleaned = cleaned.replace(/^[\s🔹▪️•\-*👉📌📍📢🔥🚀✨💰🎓🏢💼]+\s*/u, "");
 
   // Clean empty link labels left behind
-  cleaned = cleaned.replace(/^(?:apply\s+link|registration\s+link|apply\s+here|link)\s*[:\-]\s*$/i, "");
+  cleaned = cleaned.replace(
+    /^(?:apply\s+link|registration\s+link|apply\s+here|link)\s*[:\-]\s*$/i,
+    "",
+  );
 
   return cleaned.trim();
 }
 
 /** Promotional email detection to reject ad/collab emails. */
-const PROMO_EMAIL_REGEX = /(?:promo|promotion|sponsor|collab|collaboration|advertise|business|ads)@/i;
+const PROMO_EMAIL_REGEX =
+  /(?:promo|promotion|sponsor|collab|collaboration|advertise|business|ads)@/i;
 
 export interface CleanJobDetails {
   company: string | null;
@@ -101,10 +110,14 @@ export interface CleanJobDetails {
 }
 
 /**
- * Parses and cleans job details from the job model and its original text.
+ * Parses and cleans job details from the job model and its description.
+ *
+ * `description` is the sanitized post the public API returns — the backend has
+ * already stripped channel promotion from it. The cleaning below is defence in
+ * depth, and still does the real work of pulling structured fields out of prose.
  */
 export function extractCleanJobDetails(job: PublicJob): CleanJobDetails {
-  const lines = (job.originalText || "")
+  const lines = (job.description || "")
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -129,52 +142,78 @@ export function extractCleanJobDetails(job: PublicJob): CleanJobDetails {
     {
       key: "company",
       regex: /^(?:company|organization|employer|hiring\s+company)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedCompany) extractedCompany = v; },
+      setter: (v: string) => {
+        if (!extractedCompany) extractedCompany = v;
+      },
     },
     {
       key: "role",
-      regex: /^(?:role|position|job\s+title|job\s+profile|profile|designation|post)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedRole) extractedRole = v; },
+      regex:
+        /^(?:role|position|job\s+title|job\s+profile|profile|designation|post)\s*[:\-]\s*(.+)$/i,
+      setter: (v: string) => {
+        if (!extractedRole) extractedRole = v;
+      },
     },
     {
       key: "batch",
-      regex: /^(?:batch|eligible\s+batch|passing\s+year|passout\s+year|graduation\s+year|year\s+of\s+passing)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedBatch) extractedBatch = v; },
+      regex:
+        /^(?:batch|eligible\s+batch|passing\s+year|passout\s+year|graduation\s+year|year\s+of\s+passing)\s*[:\-]\s*(.+)$/i,
+      setter: (v: string) => {
+        if (!extractedBatch) extractedBatch = v;
+      },
     },
     {
       key: "location",
-      regex: /^(?:location|job\s+location|work\s+location|office\s+location|posting\s+location)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedLocation) extractedLocation = v; },
+      regex:
+        /^(?:location|job\s+location|work\s+location|office\s+location|posting\s+location)\s*[:\-]\s*(.+)$/i,
+      setter: (v: string) => {
+        if (!extractedLocation) extractedLocation = v;
+      },
     },
     {
       key: "type",
       regex: /^(?:employment\s+type|job\s+type|work\s+mode|job\s+nature|mode)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedType) extractedType = v; },
+      setter: (v: string) => {
+        if (!extractedType) extractedType = v;
+      },
     },
     {
       key: "salary",
       regex: /^(?:salary|stipend|ctc|package|compensation|expected\s+ctc|pay)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedSalary) extractedSalary = v; },
+      setter: (v: string) => {
+        if (!extractedSalary) extractedSalary = v;
+      },
     },
     {
       key: "experience",
       regex: /^(?:experience|exp|experience\s+required|target\s+experience)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedExperience) extractedExperience = v; },
+      setter: (v: string) => {
+        if (!extractedExperience) extractedExperience = v;
+      },
     },
     {
       key: "eligibility",
-      regex: /^(?:eligibility|qualification|qualifications|education|eligible\s+degree|degree|degrees|branch|eligible\s+branch|criteria|academic\s+criteria)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedEligibility) extractedEligibility = v; },
+      regex:
+        /^(?:eligibility|qualification|qualifications|education|eligible\s+degree|degree|degrees|branch|eligible\s+branch|criteria|academic\s+criteria)\s*[:\-]\s*(.+)$/i,
+      setter: (v: string) => {
+        if (!extractedEligibility) extractedEligibility = v;
+      },
     },
     {
       key: "skills",
-      regex: /^(?:skills|skills\s+required|key\s+skills|technical\s+skills|skill\s+set|desired\s+skills|tech\s+stack)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedSkills) extractedSkills = v; },
+      regex:
+        /^(?:skills|skills\s+required|key\s+skills|technical\s+skills|skill\s+set|desired\s+skills|tech\s+stack)\s*[:\-]\s*(.+)$/i,
+      setter: (v: string) => {
+        if (!extractedSkills) extractedSkills = v;
+      },
     },
     {
       key: "deadline",
-      regex: /^(?:last\s+date|deadline|apply\s+by|last\s+date\s+to\s+apply|registration\s+deadline|valid\s+till)\s*[:\-]\s*(.+)$/i,
-      setter: (v: string) => { if (!extractedDeadline) extractedDeadline = v; },
+      regex:
+        /^(?:last\s+date|deadline|apply\s+by|last\s+date\s+to\s+apply|registration\s+deadline|valid\s+till)\s*[:\-]\s*(.+)$/i,
+      setter: (v: string) => {
+        if (!extractedDeadline) extractedDeadline = v;
+      },
     },
   ];
 
@@ -212,7 +251,11 @@ export function extractCleanJobDetails(job: PublicJob): CleanJobDetails {
     if (matchedKey) continue;
 
     // Check if line is an apply URL line (e.g. "Apply here: https://...")
-    if (/^(?:apply|registration|register|apply\s+online|link)\s*[:\-]?\s*(https?:\/\/.*)?$/i.test(cleanedLine)) {
+    if (
+      /^(?:apply|registration|register|apply\s+online|link)\s*[:\-]?\s*(https?:\/\/.*)?$/i.test(
+        cleanedLine,
+      )
+    ) {
       continue;
     }
 
@@ -235,13 +278,20 @@ export function extractCleanJobDetails(job: PublicJob): CleanJobDetails {
   const filteredDescriptionLines = descriptionLines.filter((l) => {
     if (company && l.toLowerCase() === company.toLowerCase()) return false;
     if (role && l.toLowerCase() === role.toLowerCase()) return false;
-    if (company && role && (l.toLowerCase().includes(company.toLowerCase()) && l.toLowerCase().includes(role.toLowerCase()) && l.length < 80)) {
+    if (
+      company &&
+      role &&
+      l.toLowerCase().includes(company.toLowerCase()) &&
+      l.toLowerCase().includes(role.toLowerCase()) &&
+      l.length < 80
+    ) {
       return false;
     }
     return true;
   });
 
-  const cleanDescription = filteredDescriptionLines.length > 0 ? filteredDescriptionLines.join("\n\n") : null;
+  const cleanDescription =
+    filteredDescriptionLines.length > 0 ? filteredDescriptionLines.join("\n\n") : null;
 
   return {
     company,

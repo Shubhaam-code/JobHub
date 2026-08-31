@@ -1,7 +1,13 @@
-import type { Error as MongooseError } from 'mongoose';
-import { describe, expect, it } from 'vitest';
+import mongoose, { type Error as MongooseError } from 'mongoose';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { JobModel, type Job, type JobDocument } from '../src/models/job.model.js';
+import {
+  JOB_ACTIVE_WINDOW_MS,
+  jobExpiryFrom,
+  JobModel,
+  type Job,
+  type JobDocument,
+} from '../src/models/job.model.js';
 
 const validJob: Partial<Job> = {
   company: 'Example Corp',
@@ -25,6 +31,20 @@ async function captureValidationError(doc: JobDocument): Promise<MongooseError.V
   }
 
   throw new Error('Expected validation to fail, but it succeeded.');
+}
+
+/**
+ * Runs the save middleware — mongoose's own timestamps hook and then the expiry
+ * hook — without a database.
+ *
+ * With command buffering off, `save()` rejects the moment it reaches the driver,
+ * which is after every `pre('save')` hook has already run against the document.
+ * The rejection is the expected outcome here, not a failure: what it leaves
+ * behind is a document stamped exactly as a real save would have stamped it,
+ * which is what makes the createdAt → expiresAt tie assertable offline.
+ */
+async function runSaveHooks(doc: JobDocument): Promise<void> {
+  await doc.save().catch(() => undefined);
 }
 
 describe('Job model (Telegram ingestion schema)', () => {
@@ -68,5 +88,56 @@ describe('Job model (Telegram ingestion schema)', () => {
     expect(missing).toContain('telegramMessageId');
     expect(missing).toContain('originalText');
     expect(missing).toContain('postedAt');
+  });
+});
+
+describe('Job lifecycle (21-day expiry)', () => {
+  beforeAll(() => {
+    mongoose.set('bufferCommands', false);
+  });
+
+  afterAll(() => {
+    mongoose.set('bufferCommands', true);
+  });
+
+  it('starts a new listing active', () => {
+    expect(new JobModel(validJob).status).toBe('active');
+  });
+
+  it('leaves expiresAt unset until save, so nothing pre-empts a source deadline', () => {
+    expect(new JobModel(validJob).expiresAt).toBeNull();
+  });
+
+  it('expires a saved listing exactly 21 days after its own createdAt', async () => {
+    const job = new JobModel(validJob);
+
+    await runSaveHooks(job);
+
+    const createdAt = job.get('createdAt') as Date | undefined;
+    expect(createdAt).toBeInstanceOf(Date);
+    expect(job.expiresAt).toBeInstanceOf(Date);
+    expect(job.expiresAt?.getTime()).toBe((createdAt as Date).getTime() + JOB_ACTIVE_WINDOW_MS);
+    expect(job.expiresAt).toEqual(jobExpiryFrom(createdAt as Date));
+  });
+
+  it('keeps a deadline the source published rather than overwriting it', async () => {
+    const sourceDeadline = new Date('2026-09-05T00:00:00.000Z');
+    const job = new JobModel({ ...validJob, expiresAt: sourceDeadline });
+
+    await runSaveHooks(job);
+
+    expect(job.expiresAt).toEqual(sourceDeadline);
+  });
+
+  it('accepts only known lifecycle statuses', async () => {
+    const job = new JobModel(validJob);
+    // Set through `set` rather than the constructor: an out-of-enum value cannot
+    // be written in the model's own types, and the guard is there for stored
+    // data anyway, not for callers TypeScript can already see.
+    job.set('status', 'archived');
+
+    const error = await captureValidationError(job);
+
+    expect(Object.keys(error.errors)).toContain('status');
   });
 });

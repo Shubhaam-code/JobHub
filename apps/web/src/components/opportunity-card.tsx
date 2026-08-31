@@ -128,7 +128,7 @@ export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
             }
             className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md bg-accent px-4 text-sm font-semibold text-on-accent shadow-e1 transition-[background-color,box-shadow,transform] duration-150 hover:bg-accent-strong hover:shadow-e2 active:scale-[0.98] pointer-fine:min-h-10"
           >
-            Apply
+            Apply Now
             <ArrowUpRight
               className="size-4 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5"
               aria-hidden="true"

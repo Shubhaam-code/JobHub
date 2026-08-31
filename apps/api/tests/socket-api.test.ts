@@ -20,11 +20,7 @@ describe('Socket.IO realtime updates', () => {
     applyUrl: 'https://example.com/apply-test',
     location: 'Bengaluru',
     employmentType: 'internship',
-    source: 'telegram',
-    telegramChannel: 'jobs_and_internships_updates',
-    telegramMessageId: 999,
-    telegramMessageUrl: 'https://t.me/jobs_and_internships_updates/999',
-    originalText: 'TestCorp hiring Full Stack Engineer Intern for 2027 batch',
+    description: 'TestCorp hiring Full Stack Engineer Intern for 2027 batch',
     postedAt: '2026-08-31T10:00:00.000Z',
     createdAt: '2026-08-31T10:00:05.000Z',
     updatedAt: '2026-08-31T10:00:05.000Z',
@@ -77,5 +73,24 @@ describe('Socket.IO realtime updates', () => {
     expect(received.id).toBe('64f1a2b3c4d5e6f7a8b9c999');
     expect(received.company).toBe('TestCorp');
     expect(received.role).toBe('Full Stack Engineer Intern');
+  });
+
+  it('3. broadcasts no Telegram provenance — the socket is a public channel', async () => {
+    const received = await new Promise<Record<string, unknown>>((resolve) => {
+      clientSocket.once('job:new', (job: Record<string, unknown>) => resolve(job));
+
+      broadcastNewJob(mockPublicJob);
+    });
+
+    for (const field of [
+      'source',
+      'telegramChannel',
+      'telegramChannelId',
+      'telegramMessageId',
+      'telegramMessageUrl',
+      'originalText',
+    ]) {
+      expect(received[field]).toBeUndefined();
+    }
   });
 });

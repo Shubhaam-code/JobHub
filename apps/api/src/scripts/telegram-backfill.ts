@@ -4,12 +4,15 @@
  *   npm run telegram:backfill --workspace @jia/api
  *
  * Resolves TELEGRAM_CHANNELS, walks the last 7 days of each channel's history,
- * and runs every post through the normal pipeline (pre-filter → LLM classify →
- * validate → dedupe → MongoDB). No listener, no HTTP server.
+ * and runs every post through the normal pipeline (normalize → sanitize → dedupe
+ * → durable queue). No listener, no HTTP server.
  *
- * Safe to run repeatedly: deduplication is the unique
- * (telegramChannel, telegramMessageId) index, so a second run only reports
- * duplicates.
+ * It fills the queue; it does not classify. The LLM worker drains the queue, so a
+ * backfill finishes at Telegram's pace rather than the provider's, and a rate
+ * limit cannot make it lose messages.
+ *
+ * Safe to run repeatedly: deduplication is the queue's unique message key, so a
+ * second run only reports duplicates.
  */
 
 import { connectDatabase, disconnectDatabase, redactUri } from '../config/database.js';
@@ -17,7 +20,9 @@ import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { isLlmConfigured, llmModelName } from '../llm/client.js';
 import { JobModel } from '../models/job.model.js';
+import { getQueueCounts } from '../queue/ingest-queue.js';
 import { runBackfill, BACKFILL_WINDOW_DAYS, type BackfillSummary } from '../telegram/backfill.js';
+import { ensureConfiguredChannels } from '../telegram/channel-registry.js';
 import { resolveConfiguredChannels } from '../telegram/channels.js';
 import {
   createTelegramClient,
@@ -56,19 +61,26 @@ async function main(): Promise<void> {
     );
   }
 
+  // Not fatal any more: a backfill only fills the queue, so it is worth running
+  // without a key. The worker classifies whatever is waiting once one is set.
   if (!isLlmConfigured()) {
-    throw new Error(
-      'GEMINI_API_KEY is not set. Classification is what decides whether a post is a job, so a ' +
-        'backfill without it would store nothing. Set it in apps/api/.env and re-run.',
+    logger.warn(
+      '[backfill] GEMINI_API_KEY is not set — messages will be queued but nothing will be ' +
+        'classified until it is. Set it in apps/api/.env and the worker picks them up.',
     );
+  } else {
+    logger.info(`[backfill] Classifier model: ${llmModelName()}`);
   }
 
-  logger.info(`[backfill] Classifier model: ${llmModelName()}`);
   logger.info(`[backfill] Connecting to MongoDB at ${redactUri(env.MONGODB_URI)}...`);
 
   if (!(await connectDatabase())) {
     throw new Error('MongoDB connection failed — a backfill needs a working database.');
   }
+
+  // Keeps the registry in step with TELEGRAM_CHANNELS without re-enabling a
+  // channel an admin paused.
+  await ensureConfiguredChannels();
 
   const handle = createTelegramClient();
   handle.client.floodSleepThreshold = 0;
@@ -96,6 +108,7 @@ async function main(): Promise<void> {
           client: handle.client,
           entity: channel.entity,
           channelUsername: channel.username,
+          channelId: channel.id.toString(),
         });
         runs.push({ username: channel.username, summary });
       } catch (error: unknown) {
@@ -109,12 +122,12 @@ async function main(): Promise<void> {
       (acc, run) => ({
         fetched: acc.fetched + run.summary.fetched,
         eligible: acc.eligible + run.summary.eligible,
-        inserted: acc.inserted + run.summary.inserted,
+        queued: acc.queued + run.summary.queued,
         duplicates: acc.duplicates + run.summary.duplicates,
         skipped: acc.skipped + run.summary.skipped,
         errors: acc.errors + run.summary.errors,
       }),
-      { fetched: 0, eligible: 0, inserted: 0, duplicates: 0, skipped: 0, errors: 0 },
+      { fetched: 0, eligible: 0, queued: 0, duplicates: 0, skipped: 0, errors: 0 },
     );
 
     console.log('');
@@ -122,7 +135,7 @@ async function main(): Promise<void> {
     for (const { username, summary } of runs) {
       console.log(
         `  @${username}: fetched=${summary.fetched} eligible=${summary.eligible} ` +
-          `inserted=${summary.inserted} duplicates=${summary.duplicates} ` +
+          `queued=${summary.queued} duplicates=${summary.duplicates} ` +
           `skipped=${summary.skipped} errors=${summary.errors}` +
           (summary.floodWaitSeconds ? ` floodWait=${summary.floodWaitSeconds}s` : '') +
           (summary.truncated ? ' TRUNCATED' : ''),
@@ -132,8 +145,20 @@ async function main(): Promise<void> {
     console.log('');
     console.log(
       `TOTAL: channels=${runs.length}/${env.telegramChannels.length} ` +
-        `fetched=${totals.fetched} eligible=${totals.eligible} inserted=${totals.inserted} ` +
+        `fetched=${totals.fetched} eligible=${totals.eligible} queued=${totals.queued} ` +
         `duplicates=${totals.duplicates} skipped=${totals.skipped} errors=${totals.errors}`,
+    );
+
+    // Backfill only fills the queue; the worker classifies and stores.
+    const queue = await getQueueCounts();
+    console.log('');
+    console.log(
+      `Ingest queue: pending=${queue.pending} processing=${queue.processing} ` +
+        `retry_wait=${queue.retry_wait} completed=${queue.completed} failed=${queue.failed}`,
+    );
+    console.log(
+      'Queued messages are classified by the LLM worker (started with the API server).\n' +
+        'Check progress any time with `npm run queue:status --workspace @jia/api`.',
     );
 
     if (failed.length > 0) {

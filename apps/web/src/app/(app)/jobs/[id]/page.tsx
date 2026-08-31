@@ -17,10 +17,10 @@ import {
   Link2Off,
   Mail,
   MapPin,
-  Sparkles,
 } from "lucide-react";
 
 import { fetchJob, type PublicJob } from "@/lib/api";
+import { LinkifiedText } from "@/components/linkified-text";
 import { resolveLink } from "@/lib/links";
 import {
   extractCleanJobDetails,
@@ -209,7 +209,11 @@ export default function JobDetailPage() {
   const applyLink = isGenuineApplyLink(rawApply)
     ? rawApply
     : cleanDetails.applyEmail
-      ? { kind: "email" as const, text: cleanDetails.applyEmail, href: `mailto:${cleanDetails.applyEmail}` }
+      ? {
+          kind: "email" as const,
+          text: cleanDetails.applyEmail,
+          href: `mailto:${cleanDetails.applyEmail}`,
+        }
       : null;
 
   return (
@@ -239,7 +243,8 @@ export default function JobDetailPage() {
         <span className="inline-flex w-max shrink-0 items-center gap-1.5 rounded-sm border border-border bg-muted px-3 py-1.5 text-[11px] font-semibold tracking-label text-muted-foreground uppercase">
           <TypeIcon className="size-3.5" aria-hidden="true" />
           {cleanDetails.employmentType
-            ? cleanDetails.employmentType.charAt(0).toUpperCase() + cleanDetails.employmentType.slice(1)
+            ? cleanDetails.employmentType.charAt(0).toUpperCase() +
+              cleanDetails.employmentType.slice(1)
             : type === "internship"
               ? "Internship"
               : "Full-time"}
@@ -256,7 +261,9 @@ export default function JobDetailPage() {
             <dt className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
               Batch
             </dt>
-            <dd className="mt-1 text-sm font-semibold text-primary tabular-nums">{cleanDetails.batch}</dd>
+            <dd className="mt-1 text-sm font-semibold text-primary tabular-nums">
+              {cleanDetails.batch}
+            </dd>
           </div>
         )}
         {cleanDetails.location && (
@@ -266,7 +273,9 @@ export default function JobDetailPage() {
             </dt>
             <dd className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
               <MapPin className="size-3.5 shrink-0 text-subtle-foreground" aria-hidden="true" />
-              <span>{cleanDetails.location}</span>
+              <span>
+                <LinkifiedText text={cleanDetails.location} />
+              </span>
             </dd>
           </div>
         )}
@@ -277,7 +286,9 @@ export default function JobDetailPage() {
             </dt>
             <dd className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
               <Coins className="size-3.5 shrink-0 text-subtle-foreground" aria-hidden="true" />
-              <span>{cleanDetails.salary}</span>
+              <span>
+                <LinkifiedText text={cleanDetails.salary} />
+              </span>
             </dd>
           </div>
         )}
@@ -286,7 +297,9 @@ export default function JobDetailPage() {
             <dt className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
               Experience
             </dt>
-            <dd className="mt-1 text-sm font-medium text-foreground">{cleanDetails.experience}</dd>
+            <dd className="mt-1 text-sm font-medium text-foreground">
+              <LinkifiedText text={cleanDetails.experience} />
+            </dd>
           </div>
         )}
         <div>
@@ -373,7 +386,7 @@ export default function JobDetailPage() {
                   Eligibility & Qualifications
                 </span>
                 <p className="mt-1 text-sm font-medium leading-relaxed text-foreground">
-                  {cleanDetails.eligibility}
+                  <LinkifiedText text={cleanDetails.eligibility} />
                 </p>
               </div>
             )}
@@ -384,7 +397,7 @@ export default function JobDetailPage() {
                   Required Skills
                 </span>
                 <p className="mt-1 text-sm font-medium leading-relaxed text-foreground">
-                  {cleanDetails.skills}
+                  <LinkifiedText text={cleanDetails.skills} />
                 </p>
               </div>
             )}
@@ -396,7 +409,7 @@ export default function JobDetailPage() {
                 </span>
                 <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
                   <Calendar className="size-3.5 text-primary shrink-0" aria-hidden="true" />
-                  {cleanDetails.deadline}
+                  <LinkifiedText text={cleanDetails.deadline} />
                 </p>
               </div>
             )}
@@ -428,8 +441,13 @@ export default function JobDetailPage() {
               <ul className="space-y-2 text-sm leading-relaxed text-muted-foreground">
                 {cleanDetails.cleanBullets.map((bullet, idx) => (
                   <li key={idx} className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-                    <span>{bullet}</span>
+                    <CheckCircle2
+                      className="mt-0.5 size-4 shrink-0 text-primary"
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0">
+                      <LinkifiedText text={bullet} />
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -439,7 +457,7 @@ export default function JobDetailPage() {
           {/* Clean description paragraphs if present */}
           {cleanDetails.cleanDescription && (
             <div className="rounded-md border border-border bg-background p-4 sm:p-5 font-body text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {cleanDetails.cleanDescription}
+              <LinkifiedText text={cleanDetails.cleanDescription} />
             </div>
           )}
         </div>

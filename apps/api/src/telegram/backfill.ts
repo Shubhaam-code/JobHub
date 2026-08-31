@@ -1,13 +1,15 @@
 /**
  * Startup backfill: imports the last N days of channel history through the
- * EXISTING ingestion pipeline (parse → validate → dedupe → MongoDB).
+ * EXACT SAME ingestion pipeline as live messages (normalize → sanitize → dedupe
+ * → durable queue). There is no second parsing path, so a backfilled post and a
+ * live post are treated identically.
  *
  * The window is date-driven: history is walked newest → oldest and the walk
  * stops at the first message older than the cutoff, so the whole channel is
  * never fetched. The collected messages are then ingested oldest → newest.
  *
  * Safe to run repeatedly: deduplication stays the ingestion pipeline's job via
- * the unique (telegramChannel, telegramMessageId) index.
+ * the queue's unique message key.
  */
 
 import { errors } from 'telegram';
@@ -37,7 +39,8 @@ export interface BackfillSummary {
   fetched: number;
   /** Of those, the ones dated within the window. */
   eligible: number;
-  inserted: number;
+  /** Messages added to the ingest queue by this run. */
+  queued: number;
   duplicates: number;
   skipped: number;
   errors: number;
@@ -57,6 +60,8 @@ export interface BackfillOptions {
   entity: Api.Channel;
   /** Channel username — the dedup key and message-URL base. */
   channelUsername: string;
+  /** Numeric channel ID, when known. Makes the dedup key rename-proof. */
+  channelId?: string | null;
   /** Window size in days. Defaults to BACKFILL_WINDOW_DAYS. */
   windowDays?: number;
   /** Reference clock in ms; the cutoff derives from it. Injected by tests. */
@@ -113,7 +118,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillSum
   const summary: BackfillSummary = {
     fetched: 0,
     eligible: 0,
-    inserted: 0,
+    queued: 0,
     duplicates: 0,
     skipped: 0,
     errors: 0,
@@ -197,11 +202,12 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillSum
         messageId: message.id,
         date: message.date,
         channelUsername: options.channelUsername,
+        channelId: options.channelId ?? null,
       });
 
       switch (result.outcome) {
-        case 'inserted':
-          summary.inserted += 1;
+        case 'queued':
+          summary.queued += 1;
           break;
         case 'duplicate':
           summary.duplicates += 1;
@@ -224,7 +230,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillSum
 
   logger.info(
     `[backfill] Summary — fetched=${summary.fetched}, eligible=${summary.eligible}, ` +
-      `inserted=${summary.inserted}, duplicates=${summary.duplicates}, ` +
+      `queued=${summary.queued}, duplicates=${summary.duplicates}, ` +
       `skipped=${summary.skipped}, errors=${summary.errors}`,
   );
 

@@ -17,19 +17,24 @@ export interface ApiHealth {
   };
 }
 
+/**
+ * A job exactly as the public API returns it.
+ *
+ * There is nothing here about where a posting came from: no channel, no message
+ * id, no raw Telegram text. `description` is the sanitized post — the backend
+ * strips channel promotion during ingestion, so the client renders it as-is and
+ * never has to filter anything for display.
+ */
 export interface PublicJob {
   id: string;
   company: string | null;
   role: string | null;
   batch: string | null;
+  /** The apply link exactly as published. Never rewritten client-side. */
   applyUrl: string | null;
-  location?: string | null;
-  employmentType?: string | null;
-  source: string;
-  telegramChannel: string;
-  telegramMessageId: number;
-  telegramMessageUrl: string | null;
-  originalText: string;
+  location: string | null;
+  employmentType: string | null;
+  description: string;
   postedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -53,8 +58,6 @@ export interface FetchJobsParams {
   search?: string;
   batch?: string;
   type?: string;
-  /** Source channel username, with or without a leading "@". */
-  channel?: string;
 }
 
 /** Joins a path onto the API base URL without doubling or dropping slashes. */
@@ -98,9 +101,6 @@ export async function fetchJobs(
   if (params?.type && params.type.trim()) {
     query.set("type", params.type.trim());
   }
-  if (params?.channel && params.channel.trim()) {
-    query.set("channel", params.channel.trim());
-  }
 
   const queryString = query.toString();
   const endpoint = queryString ? `/api/v1/jobs?${queryString}` : "/api/v1/jobs";
@@ -118,24 +118,10 @@ export async function fetchJobs(
 }
 
 /**
- * Every channel available as a source filter: the configured Telegram channels
- * (including ones with no postings yet) plus any channel still stored in the
- * database.
+ * Note: there is deliberately no channel listing here. Source channels are
+ * internal and readable only through the admin API, so the public filter bar has
+ * no Source dropdown to populate.
  */
-export async function fetchChannels(signal?: AbortSignal): Promise<string[]> {
-  const response = await fetch(apiUrl("/api/v1/jobs/channels"), {
-    signal,
-    headers: { Accept: "application/json" },
-  });
-
-  if (!response.ok) {
-    throw new Error(`API responded with ${response.status} ${response.statusText}`);
-  }
-
-  const body = (await response.json()) as { data: string[] };
-  return body.data;
-}
-
 export async function fetchJob(id: string, signal?: AbortSignal): Promise<PublicJob> {
   const response = await fetch(apiUrl(`/api/v1/jobs/${encodeURIComponent(id)}`), {
     signal,

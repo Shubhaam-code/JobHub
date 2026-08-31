@@ -3,15 +3,31 @@ import http, { type Server as HttpServer } from 'node:http';
 import { createApp } from './app.js';
 import { connectDatabase, disconnectDatabase, redactUri } from './config/database.js';
 import { env } from './config/env.js';
+import { seedAdminUser } from './lib/auth.js';
 import { logger } from './lib/logger.js';
 import { closeSocketServer, initSocketServer } from './lib/socket.js';
+import { recoverStaleClaims } from './queue/ingest-queue.js';
+import { startQueueWorker, type QueueWorker } from './queue/worker.js';
+import { ensureConfiguredChannels } from './telegram/channel-registry.js';
 import { createTelegramClient } from './telegram/client.js';
 import { startListener, type ListenerHandle } from './telegram/listener.js';
 
 let telegramListener: ListenerHandle | null = null;
+let queueWorker: QueueWorker | null = null;
 
 async function shutdown(server: HttpServer, signal: string): Promise<void> {
   logger.info(`Received ${signal} — shutting down.`);
+
+  // Stopped before the database closes so the in-flight message can finish its
+  // write. Anything still `processing` is reclaimed by recoverStaleClaims() on
+  // the next boot, so a hard kill here costs a retry, never a message.
+  if (queueWorker) {
+    try {
+      await queueWorker.stop();
+    } catch (err) {
+      logger.warn('Error stopping the queue worker', err);
+    }
+  }
 
   if (telegramListener) {
     try {
@@ -33,6 +49,25 @@ async function main(): Promise<void> {
   logger.info(`MongoDB target: ${redactUri(env.MONGODB_URI)}`);
 
   await connectDatabase();
+
+  // Both of these are non-fatal, like the Telegram startup further down: the API
+  // must still serve jobs if either fails.
+  try {
+    const seeded = await seedAdminUser();
+    if (seeded === 'created') logger.info('[startup] Admin user created from ADMIN_EMAIL.');
+    if (seeded === 'promoted') logger.info('[startup] ADMIN_EMAIL user promoted to ADMIN.');
+  } catch (error: unknown) {
+    logger.warn('[startup] Could not seed the admin user', error);
+  }
+
+  // Also done by the listener, but the listener only runs when Telegram is
+  // configured — the admin dashboard needs its rows either way.
+  try {
+    const registered = await ensureConfiguredChannels();
+    logger.info(`[startup] Channel registry reconciled (${registered} configured channels).`);
+  } catch (error: unknown) {
+    logger.warn('[startup] Could not reconcile the channel registry', error);
+  }
 
   const app = createApp();
   const server = http.createServer(app);
@@ -59,6 +94,31 @@ async function main(): Promise<void> {
         },
       );
     });
+  }
+
+  // ── LLM worker ────────────────────────────────────────────────────────────
+  //
+  // Started before Telegram on purpose. Resolving channels and walking a 7-day
+  // backfill can take minutes, and the queue should be draining throughout —
+  // ingestion and classification are independent halves of the pipeline.
+  if (env.QUEUE_WORKER_ENABLED) {
+    try {
+      // Any message left `processing` by a crash or a kill -9 is released back
+      // to `pending` here. This is what makes the queue restart-safe.
+      const recovered = await recoverStaleClaims();
+      if (recovered > 0) {
+        logger.warn(`[startup] Recovered ${recovered} stale queue claim(s) from a previous run.`);
+      }
+    } catch (error: unknown) {
+      logger.warn('[startup] Could not recover stale queue claims', error);
+    }
+
+    queueWorker = startQueueWorker();
+  } else {
+    logger.warn(
+      '[startup] QUEUE_WORKER_ENABLED=false — messages will queue up but nothing will classify ' +
+        'them in this process.',
+    );
   }
 
   // Start Telegram listener if credentials are configured

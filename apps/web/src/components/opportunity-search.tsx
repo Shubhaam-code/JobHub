@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Search, X } from "lucide-react";
 
-import { SEARCH_SUGGESTIONS } from "@/lib/opportunities";
 import { DURATION, EASE_IN, EASE_OUT } from "@/lib/motion";
 
 const INPUT_ID = "opportunity-search";
@@ -164,27 +163,6 @@ export function OpportunitySearch({ value, onValueChange, onSubmit }: Opportunit
             Search
           </button>
         </div>
-      </div>
-
-      {/* Real shortcuts into the same local filter, not decorative tags.
-
-          The height floor is gated on `pointer-fine` rather than on a breakpoint:
-          touch density should follow the input device, not the viewport. A 768px
-          tablet is touch and keeps the 44px target; a narrow desktop window has a
-          mouse and gets the tighter 36px that reads more refined. Every control
-          on the page uses this same rule. */}
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-        <span className="text-sm text-subtle-foreground">Try</span>
-        {SEARCH_SUGGESTIONS.map((suggestion) => (
-          <button
-            key={suggestion}
-            type="button"
-            onClick={() => onValueChange(suggestion)}
-            className="inline-flex min-h-11 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-muted-foreground transition-colors duration-150 hover:border-border-strong hover:bg-muted hover:text-foreground pointer-fine:min-h-9"
-          >
-            {suggestion}
-          </button>
-        ))}
       </div>
     </form>
   );

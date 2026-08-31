@@ -1,0 +1,26 @@
+=== resume A (relevant skills) ===
+Aarav Sharma
+aarav.sharma@example.com | Bengaluru, India
+
+EDUCATION
+B.Tech in Computer Science, RV College of Engineering
+Expected graduation: 2026
+
+SKILLS
+Java, Spring Boot, MongoDB, REST APIs, Git, SQL
+
+EXPERIENCE
+Backend Developer Intern, Fintech Startup (6 months)
+Built Spring Boot microservices backed by MongoDB.
+Wrote REST APIs consumed by the mobile client.
+
+OBJECTIVE
+Seeking a backend developer internship in Bengaluru.
+[POST /profile/resume (A)] FAILED after 90012ms: AbortError This operation was aborted
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+[DOMException [AbortError]: This operation was aborted]
+
+Node.js v24.19.0
