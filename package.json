@@ -1,0 +1,32 @@
+{
+  "name": "job-internship-aggregator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aggregator for job and internship postings. Phase 0: project foundation.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace @jia/api",
+    "dev:web": "npm run dev --workspace @jia/web",
+    "build": "npm run build --workspace @jia/api && npm run build --workspace @jia/web",
+    "build:api": "npm run build --workspace @jia/api",
+    "build:web": "npm run build --workspace @jia/web",
+    "start:api": "npm run start --workspace @jia/api",
+    "start:web": "npm run start --workspace @jia/web",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.6"
+  }
+}

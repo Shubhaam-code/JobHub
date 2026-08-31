@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   Design tokens — refined in Phase 1.5 with ui-ux-pro-max
+   ===========================================================================
+   Direction carried forward from Phase 1:
+     pattern    marketplace-directory (search-led discovery, then listings)
+     style      Minimalism
+     type       "Corporate Trust" — Lexend headings + Source Sans 3 body
+
+   What changed and why. `--domain color` returns two rows that fit this
+   product. Phase 1 took everything from the "Job Board/Recruitment" row,
+   including its surfaces: background #F0F9FF, foreground #0C4A6E, border
+   #BAE6FD. Tinting every surface, every body word and every hairline the same
+   sky hue is what made the page read as a template with one variable swapped.
+
+   So brand and action hues still come from the Job Board row, but surfaces,
+   text and borders now come from the same dataset's "B2B Service" row, which
+   is neutral slate. Hue is spent only where it carries meaning: primary for
+   brand and information, green for the apply action.
+
+   Every foreground/background pair below is >= 4.5:1 (skill rule
+   `color-accessible-pairs`); the ratios are noted inline.
+   =========================================================================== */
+
+@theme {
+  /* --- Brand + action ------------------------------------------------------
+     ui-ux-pro-max --domain color, "Job Board/Recruitment" row. The green is
+     darkened from the dataset's #16A34A, whose paired on-accent is black;
+     black-on-green reads cheap on a primary action and white on #16A34A is
+     only 3.3:1. */
+  --color-primary: #0369a1; /* white text 5.9:1 */
+  --color-primary-strong: #075985; /* hover/pressed — white text 7.6:1 */
+  --color-on-primary: #ffffff;
+  --color-accent: #15803d; /* white text 5.0:1 */
+  --color-accent-strong: #166534; /* resting label + hover fill — 6.4:1 on the /8 tint, 7.0:1 with white */
+  --color-on-accent: #ffffff;
+
+  /* Error/danger. The error state already referenced `destructive` utilities,
+     but no token backed them, so its border and tint resolved to transparent
+     and its icon inherited body colour. Red-700 rather than red-600 so the same
+     hue works as text on a light tint *and* as a filled surface:
+     6.5:1 on surface, 5.8:1 on its own 6% tint, 6.5:1 with white. */
+  --color-destructive: #b91c1c;
+  --color-on-destructive: #ffffff;
+
+  /* --- Surfaces + text ----------------------------------------------------
+     ui-ux-pro-max --domain color, "B2B Service" row. */
+  --color-background: #f8fafc;
+  --color-surface: #ffffff;
+  --color-foreground: #0f172a; /* 17.0:1 on background */
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #475569; /* 7.6:1 on surface */
+  --color-subtle-foreground: #64748b; /* 4.8:1 on surface, 4.6:1 on background */
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1; /* hover / emphasis hairline */
+  --color-ring: #0369a1;
+
+  /* --- Geometry -----------------------------------------------------------
+     One radius ramp, applied by role rather than by eye. Overrides Tailwind's
+     defaults on purpose so `rounded-md` means the same thing everywhere.
+       sm  badges, chips, kbd
+       md  buttons, inputs, tabs, monograms
+       lg  cards, panels
+       xl  the hero search shell (the one deliberately larger surface) */
+  --radius-sm: 0.375rem; /* 6px  */
+  --radius-md: 0.625rem; /* 10px */
+  --radius-lg: 0.875rem; /* 14px */
+  --radius-xl: 1.25rem; /* 20px */
+
+  /* --- Letter-spacing ------------------------------------------------------
+     Phase 1.5 set tracking inline per element, which drifted to five different
+     hand-picked values (-0.035, -0.03, -0.025, -0.015, +0.04, +0.06em). Optical
+     sizing is real — larger type wants tighter tracking — but it should be a
+     ramp applied by role, not a per-element guess, or the page reads as
+     assembled rather than set.
+       display  the hero line only
+       heading  section headings and the detail-page role
+       snug     card titles and the wordmark
+       label    every uppercase micro-label and badge (was 0.04 and 0.06) */
+  --tracking-display: -0.035em;
+  --tracking-heading: -0.025em;
+  --tracking-snug: -0.015em;
+  --tracking-label: 0.06em;
+
+  /* --- Elevation ----------------------------------------------------------
+     Skill rule `elevation-consistent`: a fixed scale, no ad-hoc shadows.
+     Slate-tinted and tight rather than large soft black blurs, so cards read
+     as sitting on the page instead of floating above it.
+       e1  resting cards, header once scrolled
+       e2  card hover, search shell at rest
+       e3  search shell focused, mobile nav sheet */
+  --shadow-e1: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px -1px rgb(15 23 42 / 0.07);
+  --shadow-e2: 0 2px 4px -2px rgb(15 23 42 / 0.06), 0 8px 16px -6px rgb(15 23 42 / 0.1);
+  --shadow-e3: 0 4px 8px -4px rgb(15 23 42 / 0.06), 0 16px 32px -12px rgb(15 23 42 / 0.14);
+}
+
+@theme inline {
+  --font-heading: var(--font-lexend), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-source-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    /* Anchors land below the sticky header instead of under it — skill rules
+       `fixed-element-offset` and `focus-not-obscured`. Replaces the per-element
+       scroll-mt guesses used in Phase 1. */
+    scroll-padding-top: 5.5rem;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-body);
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    letter-spacing: var(--tracking-heading);
+  }
+
+  /* One keyboard focus treatment for every interactive element. The 2px offset
+     puts the ring on the surrounding surface, so it stays visible even on the
+     filled primary and accent buttons.
+
+     No border-radius here: setting one made every focused element adopt the 6px
+     badge radius for as long as it held focus, so a rounded-lg card visibly
+     squared off on tab-in. The outline already follows each element's own
+     border-box, which is the shape it should trace. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  /* The native control duplicates the component's own clear button. */
+  input[type="search"]::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-primary) 18%, white);
+  }
+}
+
+/* Render the destination state instead of travelling to it. Covers every CSS
+   transition on the page; Framer Motion is handled separately via
+   useReducedMotion so entrance and layout animations resolve to their final
+   frame rather than being skipped mid-flight. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
