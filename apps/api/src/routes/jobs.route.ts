@@ -33,13 +33,84 @@ const MAX_LIMIT = 100;
 const RECOMMENDATION_POOL_SIZE = 500;
 
 /**
- * There is no stored `type` field — opportunity type is derived from the role
- * text, using the same rule the web client uses (`/intern/i`). Roles that do not
- * mention an internship (including a null role) count as full-time.
+ * Internship and full-time are derived from the role text, using the same rule
+ * the web client uses (`/intern/i`). Roles that do not mention an internship
+ * (including a null role) count as full-time.
+ *
+ * These two deliberately do *not* read the stored `employmentType`: every posting
+ * has a role, but only some carry an employment type, so keying them off the
+ * stored field would empty out a filter that works today.
  */
 const INTERN_ROLE_REGEX = /intern/i;
 const INTERNSHIP_TYPE_VALUES = new Set(['internship', 'internships', 'intern']);
 const FULL_TIME_TYPE_VALUES = new Set(['full-time', 'fulltime', 'full_time', 'job', 'jobs']);
+
+/**
+ * The remaining job types, which have no equivalent in the role text and are
+ * matched against the stored `employmentType` instead.
+ *
+ * A value that nothing in the collection matches returns an empty page. That is
+ * the truthful answer for a filter — it never widens to "something close", and
+ * it never invents a listing to fill the space.
+ */
+const EMPLOYMENT_TYPE_PATTERNS = new Map<string, RegExp>([
+  ['part-time', /part[\s._-]*time/i],
+  ['contract', /contract|contractual|freelance/i],
+  ['remote', /remote|work[\s._-]*from[\s._-]*home|wfh/i],
+]);
+
+/**
+ * Remote is as often recorded in the location as in the employment type — an
+ * ingested posting says "Remote" where it says where the job is — so the remote
+ * filter reads both fields rather than missing half the listings that qualify.
+ */
+const REMOTE_LOCATION_REGEX = /remote|work[\s._-]*from[\s._-]*home|wfh|anywhere/i;
+
+/** Every accepted `type` value, for the 400 message. */
+const ACCEPTED_TYPE_VALUES = ['internship', 'full-time', 'part-time', 'remote', 'contract'];
+
+/**
+ * The Mongo clause for one `type` value, or a 400 for anything unrecognised.
+ *
+ * `value` arrives already trimmed and lower-cased; separators are normalised so
+ * `part time`, `part_time` and `part-time` are one value rather than three.
+ */
+function jobTypeClause(value: string): JobFilter {
+  if (INTERNSHIP_TYPE_VALUES.has(value)) return { role: INTERN_ROLE_REGEX };
+  if (FULL_TIME_TYPE_VALUES.has(value)) return { role: { $not: INTERN_ROLE_REGEX } };
+
+  const normalized = value.replace(/[\s_]+/g, '-');
+  const pattern = EMPLOYMENT_TYPE_PATTERNS.get(normalized);
+
+  if (pattern === undefined) {
+    throw badRequest(`Invalid type parameter. Must be one of: ${ACCEPTED_TYPE_VALUES.join(', ')}.`);
+  }
+
+  return normalized === 'remote'
+    ? { $or: [{ employmentType: pattern }, { location: REMOTE_LOCATION_REGEX }] }
+    : { employmentType: pattern };
+}
+
+/**
+ * One end of a `postedAt` window, as an absolute instant.
+ *
+ * The client sends instants rather than a named window ("today", "last 7 days")
+ * on purpose: only the browser knows which timezone the reader is in, so "today"
+ * has to be resolved to real boundaries there. The server just applies the range
+ * it was given, against the existing `postedAt` index.
+ */
+function parseInstant(value: unknown, name: string): Date | null {
+  if (value === undefined) return null;
+
+  const text = typeof value === 'string' ? value.trim() : '';
+  const parsed = text.length > 0 ? new Date(text) : new Date(Number.NaN);
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw badRequest(`Invalid ${name} parameter. Must be an ISO 8601 date or date-time.`);
+  }
+
+  return parsed;
+}
 
 /**
  * A job as the public API describes it: job data, and nothing about where it
@@ -149,12 +220,17 @@ function parsePositiveInteger(value: unknown, name: string, max?: number): numbe
 /**
  * GET /api/v1/jobs
  * Lists jobs with pagination, newest postedAt first.
- * Supports query parameters: page, limit, search, type, batch.
+ * Supports query parameters: page, limit, search, type, batch, location,
+ * postedFrom, postedTo, sort.
  *
  * Only listings that are still on show are returned — active, and inside their
  * 21-day window (`activeJobClauses`). An expired posting is not deleted, it is
  * simply not something this endpoint will hand out, so the count and the pages
  * both describe the live feed.
+ *
+ * Every filter narrows; none of them widen. A combination that nothing matches
+ * answers with an empty page and `total: 0`, which is the honest result — the
+ * caller asked a question the collection cannot answer today.
  *
  * There is deliberately no `channel` parameter: accepting one would let anyone
  * confirm or enumerate the source channels by observing which values return
@@ -188,28 +264,61 @@ jobsRouter.get('/', async (req: Request, res: Response) => {
     }
   }
 
-  // Type filter — internship vs full-time, derived from the role text.
+  // Location filter, against the stored location text.
+  if (typeof req.query['location'] === 'string') {
+    const locationTrimmed = req.query['location'].trim();
+    if (locationTrimmed.length > 0) {
+      andClauses.push({
+        location: new RegExp(escapeRegex(locationTrimmed), 'i'),
+      });
+    }
+  }
+
+  // Type filter — see `jobTypeClause` for how each value is resolved.
   if (typeof req.query['type'] === 'string') {
     const typeTrimmed = req.query['type'].trim().toLowerCase();
     if (typeTrimmed.length > 0) {
-      if (INTERNSHIP_TYPE_VALUES.has(typeTrimmed)) {
-        andClauses.push({ role: INTERN_ROLE_REGEX });
-      } else if (FULL_TIME_TYPE_VALUES.has(typeTrimmed)) {
-        andClauses.push({ role: { $not: INTERN_ROLE_REGEX } });
-      } else {
-        throw badRequest('Invalid type parameter. Must be "internship" or "full-time".');
-      }
+      andClauses.push(jobTypeClause(typeTrimmed));
     }
+  }
+
+  // Posted-date window. Both ends are optional, so "since yesterday" and
+  // "one specific day" are the same parameter pair.
+  const postedFrom = parseInstant(req.query['postedFrom'], 'postedFrom');
+  const postedTo = parseInstant(req.query['postedTo'], 'postedTo');
+
+  if (postedFrom && postedTo && postedFrom.getTime() > postedTo.getTime()) {
+    throw badRequest('Invalid date range. postedFrom must not be later than postedTo.');
+  }
+
+  if (postedFrom || postedTo) {
+    andClauses.push({
+      postedAt: {
+        ...(postedFrom ? { $gte: postedFrom } : {}),
+        ...(postedTo ? { $lte: postedTo } : {}),
+      },
+    });
   }
 
   // Always at least the two expiry clauses, so the filter is always an $and.
   const filter: JobFilter = { $and: andClauses };
 
+  /* Newest first by default, which is what the feed is for. `_id` breaks ties in
+     the same direction so a job never sits on two pages, or on neither. */
+  const sortParam =
+    typeof req.query['sort'] === 'string' ? req.query['sort'].trim().toLowerCase() : '';
+
+  if (sortParam.length > 0 && sortParam !== 'newest' && sortParam !== 'oldest') {
+    throw badRequest('Invalid sort parameter. Must be "newest" or "oldest".');
+  }
+
+  const sortDirection = sortParam === 'oldest' ? 1 : -1;
+
   const skip = (page - 1) * limit;
 
   const [docs, total] = await Promise.all([
     JobModel.find(filter)
-      .sort({ postedAt: -1, _id: -1 })
+      .sort({ postedAt: sortDirection, _id: sortDirection })
       .skip(skip)
       .limit(limit)
       .lean<MongoJobDoc[]>(),

@@ -93,6 +93,19 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The API's own message when it sent one, a reachability hint when it did not.
+ *
+ * A fetch that never reached the server throws a bare `TypeError`, whose message
+ * ("Failed to fetch") tells a reader nothing actionable — so that case names the
+ * likely cause instead.
+ */
+export function errorText(error: unknown): string {
+  return error instanceof ApiError && error.message.length > 0
+    ? error.message
+    : "Unable to reach the API. Check that it is running and try again.";
+}
+
 /* ── Token storage ────────────────────────────────────────────────────────── */
 
 export function readProfileToken(): string | null {

@@ -31,29 +31,34 @@ if (process.env.NODE_ENV === "production" && !publishableKey) {
 
 export const CLERK_ENABLED = Boolean(publishableKey);
 
-/* Where the two auth flows live. Kept here so the landing page, the proxy and
-   the header all agree on one spelling of each path. */
+/* Where the entry flow lives. Kept here so the proxy, the landing page, the
+   sign-in card and the sign-out redirect all agree on one spelling of each path.
+
+   `/welcome` is the front door: opening the site with no session lands there, and
+   signing out returns there. It is public — it has to be, since it is what an
+   anonymous visitor is shown — and it holds the Login button that leads into
+   `/sign-in`, which in turn links on to `/sign-up`. */
 export const WELCOME_PATH = "/welcome";
 export const SIGN_IN_PATH = "/sign-in";
 export const SIGN_UP_PATH = "/sign-up";
 
 /**
- * Marks a visitor who came through the landing page while Clerk was not
+ * Marks a visitor who chose "Continue without signing in" while Clerk was not
  * configured.
  *
  * This is *not* a second authentication system and proves nothing about who the
- * visitor is — it only records that they chose "Continue as User" on the landing
- * page, so the app can open at the feed instead of bouncing back. It unlocks
- * exactly what an anonymous visitor could already read: the public job feed. The
- * admin dashboard still needs the API's own bearer token and `requireAdmin`, and
+ * visitor is — it only records that they took that button on the sign-in page, so
+ * the app can open at the feed instead of bouncing back. It unlocks exactly what
+ * an anonymous visitor could already read: the public job feed. The admin
+ * dashboard still needs the API's own bearer token and `requireAdmin`, and
  * resume/recommendations still need the profile token, both checked server-side.
  *
- * It exists so the sign-in-first flow is complete for a checkout with no Clerk
- * instance. It persists across browser restarts until the visitor signs out, so
- * the keyless path behaves like the other two. With Clerk configured the real
- * session takes over and this is never read. A production build cannot reach this
- * path at all — `CLERK_ENABLED` is false only when the key is missing, which
- * stops the build above.
+ * It exists so the entry flow is complete for a checkout with no Clerk instance.
+ * It persists across browser restarts until the visitor signs out, so the keyless
+ * path behaves like the other two. With Clerk configured the real session takes
+ * over and this is never read. A production build cannot reach this path at all —
+ * `CLERK_ENABLED` is false only when the key is missing, which stops the build
+ * above.
  */
 export const GUEST_COOKIE = "jia.guest";
 
@@ -61,7 +66,7 @@ export const GUEST_COOKIE = "jia.guest";
  * Reduce an untrusted `redirect_url` to a same-origin path, or `null`.
  *
  * The value arrives in a query string, so anyone can choose it. Without this an
- * attacker could hand out `/welcome?redirect_url=https://evil.example` and have
+ * attacker could hand out `/sign-in?redirect_url=https://evil.example` and have
  * our own sign-in flow send the visitor there afterwards. Only a plain path is
  * accepted: a leading `//` or `/\` is how a browser reads a protocol-relative
  * URL, so both are rejected along with anything carrying a scheme.

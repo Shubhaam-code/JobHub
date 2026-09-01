@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>JobFeed</title>
+  <!--
+    The tab icon: the logo mark's cascade of rounded squares, rebuilt as vector.
+
+    Hand-authored rather than generated from `public/logo.jpeg` (which is what
+    `scripts/logo-assets.mjs` used to do) for two reasons. A JPEG cannot carry an
+    alpha channel, so every raster cut from it arrived matted onto opaque black —
+    a black tile in the tab. And a 16px favicon is the one place where resampled
+    JPEG edges are visible as mush; these are three rects, so they stay sharp at
+    every size a browser asks for.
+
+    Geometry is on a 32-unit grid, so at 16px and 32px every edge lands on a whole
+    or half pixel instead of straddling one:
+
+      - Three tiles, not the source's four. The fourth is a small detached square
+        that lands at ~2px in a tab and reads as dirt; dropping it leaves the part
+        of the mark that carries it — the diagonal step down from a large orange
+        tile to a small blue one.
+      - Tiles meet corner to corner (13 -> 15, 24 -> 24), which is the joint the
+        source blends with a gradient. Flat fills instead of that gradient: at
+        16px a gradient averages out to one muddy mid-tone, while flat tiles keep
+        three readable colours.
+      - Radii are a constant ~27% of each side, so the tiles read as one family
+        rather than three unrelated shapes.
+      - The artwork's box is 2..30 on both axes: square, centred, and 2 units of
+        margin so nothing touches the edge of a masked tile.
+
+    No background rect on purpose — the tile is transparent, so browser chrome
+    shows through in both light and dark themes.
+  -->
+  <rect x="2" y="2" width="13" height="13" rx="3.5" fill="#FF6B2C" />
+  <rect x="15" y="15" width="9" height="9" rx="2.4" fill="#4B3FEF" />
+  <rect x="24" y="24" width="6" height="6" rx="1.6" fill="#1668E8" />
+</svg>

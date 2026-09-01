@@ -1,0 +1,83 @@
+# Render blueprint for the API (apps/api).
+#
+# The web app is deployed separately on Vercel with Root Directory = apps/web —
+# see README "Deployment". Only the backend lives here.
+#
+# Apply it from the Render dashboard: New → Blueprint → pick this repository.
+# Every `sync: false` variable below has to be filled in the dashboard on the
+# first deploy; Render will not start the service until they are set.
+services:
+  - type: web
+    name: jia-api
+    runtime: node
+    plan: free
+    # Closest region to the primary audience. Put the MongoDB Atlas cluster in the
+    # same region — every request pays the round trip to it.
+    region: singapore
+
+    # Build and start run from the repository root, so npm sees the workspaces.
+    # `--include=dev` is required: `tsc` comes from devDependencies, and npm omits
+    # those by default once NODE_ENV=production is set below.
+    buildCommand: npm ci --include=dev && npm run build:api
+    startCommand: npm run start:api
+
+    # Liveness only — it answers 200 whenever the process can respond, so a
+    # transient database blip does not roll back a good deploy. Check
+    # /health/ready by hand after deploying to confirm MongoDB actually connected.
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # PORT is deliberately absent: Render injects it, and the config coerces
+      # whatever it injects. Hardcoding it here would break the health check.
+
+      # ── Required ────────────────────────────────────────────────────────────
+      # mongodb+srv://... from Atlas. The API refuses to boot without it.
+      - key: MONGODB_URI
+        sync: false
+      # The deployed frontend origin(s), comma-separated, no trailing slash.
+      # e.g. https://your-app.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+
+      # Signs the admin bearer tokens. Generated once by Render and then left
+      # alone — rotating it invalidates every outstanding admin token.
+      - key: AUTH_SECRET
+        generateValue: true
+
+      # ── Secrets: set these in the dashboard, never in this file ─────────────
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      # Full Telegram account credential — treat it exactly like a password.
+      - key: TELEGRAM_SESSION
+        sync: false
+      # Optional first-admin bootstrap. Leave unset to create the admin with
+      # `npm run user:create --workspace @jia/api` instead.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+
+      # ── Non-secret configuration ────────────────────────────────────────────
+      # Comma-separated Telegram channel usernames. Kept in the dashboard rather
+      # than here so the list can change without a redeploy of the blueprint.
+      - key: TELEGRAM_CHANNELS
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: GEMINI_MODEL
+        value: gemini-3.7-flash
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+
+      # Every remaining variable in apps/api/.env.example (queue tuning, LLM
+      # throttling, RESUME_MAX_BYTES, RECOMMENDATION_MIN_SCORE) has a working
+      # default in src/config/env.ts. Add one here only to override it.

@@ -10,9 +10,8 @@
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace", "@jia/web"],
-      "port": 3100,
-      "autoPort": true
+      "runtimeArgs": ["run", "dev", "--workspace", "@jia/web", "--", "-p", "3100"],
+      "port": 3100
     },
     {
       "name": "attach-3000",

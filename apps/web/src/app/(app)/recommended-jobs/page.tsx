@@ -46,8 +46,8 @@ function MatchPreview() {
             <span className="size-9 shrink-0 rounded-md border border-border bg-muted" />
             <span className="h-3 w-20 rounded-sm bg-muted" />
           </div>
-          <span className="inline-flex shrink-0 items-center rounded-sm border border-accent/30 bg-accent/10 px-2 py-1 text-[11px] font-semibold tracking-label text-accent-strong uppercase tabular-nums">
-            92% Match
+          <span className="inline-flex shrink-0 items-center rounded-sm border border-primary/20 bg-primary/6 px-2 py-0.5 text-[11px] font-medium text-primary-strong tabular-nums">
+            92% match
           </span>
         </div>
 
@@ -59,7 +59,7 @@ function MatchPreview() {
         <ul className="mt-4 flex flex-col gap-1.5 border-t border-border pt-4">
           {SCORED_DIMENSIONS.map((dimension) => (
             <li key={dimension} className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <Check className="size-3.5 shrink-0 text-accent" />
+              <Check className="size-3.5 shrink-0 text-primary" />
               <span>{dimension} matched</span>
             </li>
           ))}
@@ -135,7 +135,9 @@ export default function RecommendedJobsPage() {
   };
 
   return (
-    <main id="main">
+    /* No <main> here: the (app) layout already provides the one landmark, and a
+       second would nest them and duplicate the skip-link target. */
+    <>
       <section className="border-b border-border/70 bg-gradient-to-b from-surface to-background">
         <div className="mx-auto w-full max-w-6xl px-4 pt-14 pb-14 text-center sm:px-6 sm:pt-20 sm:pb-16 lg:px-8 lg:pt-24 lg:pb-20">
           <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface px-2.5 py-1 text-[11px] font-semibold tracking-label text-muted-foreground uppercase">
@@ -151,7 +153,7 @@ export default function RecommendedJobsPage() {
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
             <Link
-              href="/profile"
+              href="/dashboard/profile"
               className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-surface px-4 text-sm font-medium text-muted-foreground transition-[background-color,border-color,color] duration-150 hover:border-border-strong hover:bg-muted hover:text-foreground pointer-fine:min-h-10"
             >
               <SlidersHorizontal className="size-4" aria-hidden="true" />
@@ -234,7 +236,7 @@ export default function RecommendedJobsPage() {
               them. You can edit everything afterwards.
             </p>
             <Link
-              href="/profile"
+              href="/dashboard/resume"
               className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 text-sm font-semibold text-on-primary shadow-e1 transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary-strong hover:shadow-e2 active:scale-[0.98] pointer-fine:min-h-10"
             >
               <FileUp className="size-4" aria-hidden="true" />
@@ -256,7 +258,7 @@ export default function RecommendedJobsPage() {
               Add at least a few skills or a preferred role, and matches will appear here.
             </p>
             <Link
-              href="/profile"
+              href="/dashboard/profile"
               className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 text-sm font-semibold text-on-primary shadow-e1 transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary-strong hover:shadow-e2 active:scale-[0.98] pointer-fine:min-h-10"
             >
               <SlidersHorizontal className="size-4" aria-hidden="true" />
@@ -282,14 +284,14 @@ export default function RecommendedJobsPage() {
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <Link
-                href="/profile"
+                href="/dashboard/profile"
                 className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-5 text-sm font-semibold text-on-primary shadow-e1 transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary-strong hover:shadow-e2 active:scale-[0.98] pointer-fine:min-h-10"
               >
                 <SlidersHorizontal className="size-4" aria-hidden="true" />
                 Update preferences
               </Link>
               <Link
-                href="/#opportunities"
+                href="/jobs"
                 className="inline-flex min-h-11 items-center rounded-md border border-border bg-surface px-4 text-sm font-medium text-muted-foreground transition-[background-color,border-color,color] duration-150 hover:border-border-strong hover:bg-muted hover:text-foreground pointer-fine:min-h-10"
               >
                 Browse all opportunities
@@ -298,13 +300,18 @@ export default function RecommendedJobsPage() {
           </div>
         ) : (
           <>
-            <p className="text-sm text-muted-foreground">
-              <span className="font-semibold text-foreground tabular-nums">
-                {recommendations.length}
-              </span>{" "}
-              {recommendations.length === 1 ? "match" : "matches"} scoring {minScore}% or higher.
-            </p>
-            <ul className="mt-6 grid gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
+            {/* Same results header as the Jobs page: the count sits on a rule
+                above the grid, so both screens read as one product. There is no
+                sort control here — the API returns strongest match first. */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+              <p className="text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground tabular-nums">
+                  {recommendations.length}
+                </span>{" "}
+                {recommendations.length === 1 ? "match" : "matches"} scoring {minScore}% or higher.
+              </p>
+            </div>
+            <ul className="mt-5 grid gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
               {recommendations.map((recommendation) => (
                 <li key={recommendation.job.id} className="h-full">
                   <RecommendationCard recommendation={recommendation} />
@@ -314,6 +321,6 @@ export default function RecommendedJobsPage() {
           </>
         )}
       </section>
-    </main>
+    </>
   );
 }

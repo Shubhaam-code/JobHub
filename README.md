@@ -331,16 +331,21 @@ signing in through one can never grant what the other guards.
 |                     | Normal users                                 | Administrators                                          |
 | ------------------- | -------------------------------------------- | ------------------------------------------------------- |
 | Provider            | Clerk (`@clerk/nextjs`)                      | This project's own API                                  |
-| Entry point         | `/welcome` → "Continue as User" → `/sign-in` | `/welcome` → "Admin Login" → `/admin`                   |
+| Entry point         | `/sign-in` (the "Job Seeker" tab)            | `/sign-in` → "Admin" tab → `/admin`                     |
 | Credential          | Clerk session cookie                         | HMAC bearer token from `POST /api/auth/login`           |
 | Enforced by         | `apps/web/src/proxy.ts`                      | `requireAdmin`, mounted on the admin router itself      |
 | Accounts created by | Self-service sign-up                         | Operator only (see [Admin dashboard](#admin-dashboard)) |
 
-`/welcome` is the first page a signed-out visitor sees; every other route redirects there, deep
-links included (`/jobs/abc` → `/welcome?redirect_url=/jobs/abc`, and back again after sign-in).
-An already-signed-in visitor is redirected off `/welcome` to the feed, so nobody sees the landing
-page twice. `redirect_url` is reduced to a same-origin path before use — it arrives in a query
-string, so an unchecked value would make our own sign-in flow an open redirect.
+`/sign-in` is the first page a signed-out visitor sees; every other route redirects there, deep
+links included (`/jobs/abc` → `/sign-in?redirect_url=/jobs/abc`, and back again after sign-in).
+`redirect_url` is reduced to a same-origin path before use — it arrives in a query string, so an
+unchecked value would make our own sign-in flow an open redirect. A signed-in visitor is *not*
+bounced off `/sign-in`: Clerk's flow re-enters its own sub-paths (`sso-callback`, `factor-one`)
+with a live session, and redirecting those would break OAuth and multi-factor sign-in.
+
+Both doors are on that one screen as a **Job Seeker | Admin** tab pair. They are links across
+routes rather than a client-side toggle, so switching is a navigation and signing in through one
+can never confer the other.
 
 **A Clerk user is never an administrator.** Nothing links a Clerk identity to a Mongo `User`
 record, and `ADMIN` is only ever read from that record, so `/api/admin/*` answers `403` to a
@@ -359,9 +364,10 @@ CLERK_SECRET_KEY=sk_test_...
 would inline it into the browser bundle and publish it; only `src/proxy.ts` reads it.
 
 Without the keys, `npm run dev:web` still serves the feed and the admin dashboard — the gate is
-skipped so the rest of the project stays runnable — and `/welcome` says what is missing. A
-production build **fails on purpose** rather than ship an app whose gate does nothing, so
-`npm run build:web` needs both keys present.
+skipped so the rest of the project stays runnable — and `/sign-in` says what is missing and offers
+a "Continue without signing in" button instead of a login form. A production build **fails on
+purpose** rather than ship an app whose gate does nothing, so `npm run build:web` needs both keys
+present.
 
 ## Admin dashboard
 
@@ -377,10 +383,10 @@ paused channel is also skipped by the startup backfill, and a restart never un-p
 Access is enforced **on the API**, not by the page: `requireAdmin` is applied to the admin router
 itself, so every endpoint under `/api/admin` returns `401` without a valid token and `403` for a
 normal `USER` — including a `USER` holding a correctly-signed token that claims `ADMIN`, because
-the role is read from the database on every request. That is why linking the page from `/welcome`
-costs nothing: the link leads to a sign-in form, not to anything an anonymous visitor can read.
-The page is deliberately **not** linked from the site header, so a normal signed-in user is never
-shown a door that is not theirs — reaching it takes the landing page or the `/admin` URL.
+the role is read from the database on every request. That is why the "Admin" tab on the sign-in
+card costs nothing: the link leads to a sign-in form, not to anything an anonymous visitor can
+read. The page is deliberately **not** linked from the site header, so a normal signed-in user is
+never shown a door that is not theirs — reaching it takes that tab or the `/admin` URL.
 
 There is no signup. Accounts are created by the operator, either by setting `ADMIN_EMAIL` and
 `ADMIN_PASSWORD` (seeded idempotently at startup) or with:

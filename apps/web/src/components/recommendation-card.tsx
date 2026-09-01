@@ -15,13 +15,16 @@ import { resolveLink } from "@/lib/links";
 import type { Recommendation } from "@/lib/profile";
 
 /**
- * Score bands. The colour is a reading aid, not new visual design: it reuses the
- * accent (positive) and primary (neutral) tokens already in the palette.
+ * Score bands, as a text treatment rather than a filled chip.
+ *
+ * The score is context for the card, not its call to action: a strong match
+ * earns the brand hue as *text* over a whisper of tint, never a solid orange
+ * block that outshouts the role it is describing. Weaker bands recede further.
  */
 function scoreTone(score: number): string {
-  if (score >= 80) return "border-accent/30 bg-accent/10 text-accent-strong";
-  if (score >= 65) return "border-primary/30 bg-primary/10 text-primary-strong";
-  return "border-border bg-muted text-muted-foreground";
+  if (score >= 80) return "border-primary/20 bg-primary/6 text-primary-strong";
+  if (score >= 65) return "border-border bg-transparent text-muted-foreground";
+  return "border-border bg-transparent text-subtle-foreground";
 }
 
 function formatPostedDate(isoString: string): string {
@@ -75,11 +78,13 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
           </span>
         </div>
 
-        {/* The score leads the card: it is the reason this job is on screen. */}
+        {/* The reason this job is on screen — stated quietly, in lower case, so
+            it reads as a note on the card rather than a badge competing with
+            the role heading below it. */}
         <span
-          className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-2 py-1 text-[11px] font-semibold tracking-label uppercase tabular-nums ${scoreTone(matchScore)}`}
+          className={`inline-flex shrink-0 items-center rounded-sm border px-2 py-0.5 text-[11px] font-medium tabular-nums ${scoreTone(matchScore)}`}
         >
-          {matchScore}% Match
+          {matchScore}% match
         </span>
       </div>
 
@@ -121,7 +126,7 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
         <ul className="mt-4 flex flex-col gap-1.5">
           {reasons.map((reason) => (
             <li key={reason} className="flex items-start gap-2 text-[13px] text-muted-foreground">
-              <Check className="mt-0.5 size-3.5 shrink-0 text-accent" aria-hidden="true" />
+              <Check className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
               <span>{reason}</span>
             </li>
           ))}
@@ -152,7 +157,7 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
                 ? `Email ${applyLink.text} to apply for ${displayRole} at ${displayCompany}`
                 : `Apply for ${displayRole} at ${displayCompany} (opens in a new tab)`
             }
-            className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md bg-accent px-4 text-sm font-semibold text-on-accent shadow-e1 transition-[background-color,box-shadow,transform] duration-150 hover:bg-accent-strong hover:shadow-e2 active:scale-[0.98] pointer-fine:min-h-10"
+            className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-sm font-semibold text-on-primary shadow-e1 transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary-strong hover:shadow-e2 active:scale-[0.98] pointer-fine:min-h-10"
           >
             Apply Now
             <ArrowUpRight

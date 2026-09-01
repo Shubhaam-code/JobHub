@@ -20,14 +20,24 @@ const sourceSans = Source_Sans_3({
 });
 
 export const metadata: Metadata = {
-  title: "JobFeed — jobs and internships for your batch",
+  /* A template rather than a bare string, so every page that names itself keeps
+     the brand in the tab: "Explore Jobs — JobHub". `default` is what routes that
+     set no title of their own get, and it is the bare brand: the tab is not the
+     place for a tagline. */
+  title: {
+    default: "JobHub",
+    template: "%s — JobHub",
+  },
   description:
     "JobFeed gathers jobs and internships from public channels and lists them by role, batch and location, so you can see what is actually open to you in one place.",
-  /* Points at the same public/image.png the header and footer render, so the tab
-     icon is the real mark rather than the create-next-app placeholder that used
-     to sit at app/favicon.ico. Declared here instead of copying the file to
-     app/icon.png so the logo lives in exactly one place. */
-  icons: { icon: "/image.png" },
+  /* No `icons` key: `app/icon.png` and `app/apple-icon.png` are file conventions
+     Next resolves on its own, and it fingerprints them for cache-busting and
+     fills in the right `type`/`sizes` — none of which a hand-written path gets.
+     Declaring both would emit two competing <link rel="icon"> tags.
+
+     Those two files are square crops of the icon-only source, built by
+     `scripts/logo-assets.mjs`. The wide lockup this used to point at was the
+     wrong shape for a 16px tab: browsers letterbox it and the wordmark smears. */
 };
 
 export const viewport: Viewport = {
@@ -57,10 +67,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col">
         {CLERK_ENABLED ? (
           <ClerkProvider
-            /* Signing out lands back on the landing page rather than on a route
-               the proxy would immediately bounce, so there is one navigation
-               instead of two. Set on the provider so the avatar menu and any
-               sign-out control agree without repeating themselves. */
+            /* Signing out lands on the landing page — the same place the proxy
+               would send them next, so there is one navigation instead of two,
+               and it is a page a signed-out visitor is allowed to read. Set on
+               the provider so the avatar menu and any sign-out control agree
+               without repeating themselves. */
             afterSignOutUrl="/welcome"
             /* Enough to stop Clerk's widget looking bolted on: it inherits the
                brand colour, the corner radius and the body face from the same
@@ -68,12 +79,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                restyling Clerk's internals would break on their next release. */
             appearance={{
               variables: {
-                colorPrimary: "#0369a1",
+                colorPrimary: "#d24200",
                 colorPrimaryForeground: "#ffffff",
-                colorForeground: "#0f172a",
-                colorMutedForeground: "#475569",
-                colorBorder: "#e2e8f0",
-                colorRing: "#0369a1",
+                colorForeground: "#1c1917",
+                colorMutedForeground: "#57534e",
+                colorBorder: "#e7e5e4",
+                colorRing: "#d24200",
                 borderRadius: "0.625rem",
                 fontFamily: "var(--font-source-sans)",
               },

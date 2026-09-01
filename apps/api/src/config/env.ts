@@ -20,10 +20,17 @@ const optionalValue = z
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  /** Localhost default is for development only — production must set this. */
   MONGODB_URI: z
     .string()
     .regex(/^mongodb(\+srv)?:\/\/.+/, 'must start with mongodb:// or mongodb+srv://')
     .default(DEFAULT_MONGODB_URI),
+  /**
+   * Comma-separated browser origins allowed to call the API, used for both the
+   * REST routes and Socket.IO. Origins only — scheme and host, no path and no
+   * trailing slash (one is stripped anyway). Production must set this; the
+   * localhost default would reject the deployed frontend.
+   */
   CORS_ORIGINS: z.string().min(1).default('http://localhost:3000'),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 
@@ -153,6 +160,54 @@ export interface AppEnv extends RawEnv {
 const DEV_AUTH_SECRET = 'insecure-development-only-auth-secret';
 
 /**
+ * Refuses to boot when a variable that has a localhost default was left unset in
+ * production.
+ *
+ * The defaults exist so local development and tests need no configuration. In a
+ * deployment, silently falling back to one is worse than not starting: a
+ * localhost MONGODB_URI connects to nothing, and a localhost CORS_ORIGINS blocks
+ * the real frontend with a browser error that reads as a frontend bug. Same
+ * fail-fast shape as `resolveAuthSecret` below.
+ */
+function requireInProduction(
+  raw: string | undefined,
+  nodeEnv: RawEnv['NODE_ENV'],
+  name: string,
+  hint: string,
+): void {
+  if (nodeEnv !== 'production') return;
+  if (raw !== undefined && raw.trim().length > 0) return;
+
+  throw new Error(
+    `Invalid environment configuration:\n  - ${name}: required in production (${hint})`,
+  );
+}
+
+/**
+ * Splits CORS_ORIGINS into origins a browser can actually match: trims
+ * whitespace, ignores empty entries, and removes duplicates.
+ *
+ * A trailing slash is dropped because the browser's `Origin` header never has
+ * one — `https://app.vercel.app/` would match nothing at all, which is the most
+ * common way an otherwise correct deployment still fails CORS.
+ */
+function parseOriginList(raw: string): string[] {
+  const seen = new Set<string>();
+  const origins: string[] = [];
+
+  for (const entry of raw.split(',')) {
+    const origin = entry.trim().replace(/\/+$/, '');
+    if (origin.length === 0) continue;
+    if (seen.has(origin)) continue;
+
+    seen.add(origin);
+    origins.push(origin);
+  }
+
+  return origins;
+}
+
+/**
  * Resolves the token signing key. Missing AUTH_SECRET is fatal in production —
  * a guessable key there would make admin tokens forgeable — and a warning
  * everywhere else, so tests and local development need no configuration.
@@ -213,12 +268,30 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   }
 
   const data = result.data;
+  const corsOrigins = parseOriginList(data.CORS_ORIGINS);
+
+  requireInProduction(
+    source.MONGODB_URI,
+    data.NODE_ENV,
+    'MONGODB_URI',
+    'set the mongodb+srv:// connection string of the deployed database',
+  );
+
+  /* Checked as the *parsed* list rather than the raw string, so two different
+     mistakes are caught by one guard: an unset variable, which would silently
+     leave the localhost default in place, and a value holding no usable origin —
+     a stray comma, say. An empty allow-list rejects every browser request, which
+     from the outside reads as a frontend bug rather than a missing variable. */
+  requireInProduction(
+    source.CORS_ORIGINS === undefined ? undefined : corsOrigins.join(','),
+    data.NODE_ENV,
+    'CORS_ORIGINS',
+    'set the deployed frontend origin, e.g. https://your-app.vercel.app',
+  );
 
   return {
     ...data,
-    corsOrigins: data.CORS_ORIGINS.split(',')
-      .map((origin) => origin.trim())
-      .filter((origin) => origin.length > 0),
+    corsOrigins,
     telegramChannels: parseChannelList(data.TELEGRAM_CHANNELS),
     authSecret: resolveAuthSecret(data.AUTH_SECRET, data.NODE_ENV),
     isDevelopment: data.NODE_ENV === 'development',

@@ -329,7 +329,7 @@ export default function JobDetailPage() {
             whileHover={reduceMotion ? undefined : { y: -1 }}
             whileTap={reduceMotion ? undefined : { scale: 0.985 }}
             transition={{ duration: DURATION.press, ease: EASE_OUT }}
-            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-accent px-7 text-[15px] font-semibold text-on-accent shadow-e1 transition-[background-color,box-shadow] duration-150 hover:bg-accent-strong hover:shadow-e2 sm:w-auto"
+            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-primary px-7 text-[15px] font-semibold text-on-primary shadow-e1 transition-[background-color,box-shadow] duration-150 hover:bg-primary-strong hover:shadow-e2 sm:w-auto"
           >
             {applyLink.kind === "email" ? "Email to Apply" : "Apply Now"}
             <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" />

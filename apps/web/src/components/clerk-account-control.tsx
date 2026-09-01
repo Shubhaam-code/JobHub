@@ -1,6 +1,6 @@
 "use client";
 
-import { SignOutButton, UserButton, useAuth } from "@clerk/nextjs";
+import { SignOutButton, UserButton, useAuth, useUser } from "@clerk/nextjs";
 import { LogOut } from "lucide-react";
 
 /**
@@ -33,9 +33,45 @@ export function ClerkUserButton() {
 }
 
 /**
- * Sign out from the mobile menu. The avatar menu is a poor fit at that width, so
- * this is a plain row styled like its siblings in the same list.
+ * The signed-in user's own name, as `, Ada` — for a greeting to interpolate.
+ *
+ * Renders nothing until Clerk has loaded, and nothing when the account has no
+ * name on it: a greeting reading "Hi 👋" is fine, an invented name is not. Clerk
+ * allows email-only sign-up, so `firstName` is genuinely often absent and the
+ * email's local part is the next-best thing the account actually contains.
  */
+export function ClerkFirstName() {
+  const { isLoaded, user } = useUser();
+  if (!isLoaded || !user) return null;
+
+  const name =
+    user.firstName?.trim() ||
+    user.username?.trim() ||
+    user.primaryEmailAddress?.emailAddress.split("@")[0]?.trim() ||
+    "";
+
+  return name.length > 0 ? <>, {name}</> : null;
+}
+
+/**
+ * Sign out as a plain row, for a list that styles its own items — the dashboard
+ * sidebar. Renders nothing when there is no session to end, so the row never
+ * offers an exit that would do nothing.
+ */
+export function ClerkSignOutInline({ className }: { className: string }) {
+  const { isLoaded, isSignedIn } = useAuth();
+  if (!isLoaded || !isSignedIn) return null;
+
+  return (
+    <SignOutButton>
+      <button type="button" className={className}>
+        <LogOut className="size-4 shrink-0" aria-hidden="true" />
+        Logout
+      </button>
+    </SignOutButton>
+  );
+}
+
 export function ClerkSignOutRow({ onNavigate }: { onNavigate: () => void }) {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded || !isSignedIn) return null;

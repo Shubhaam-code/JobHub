@@ -8,7 +8,7 @@
  * overflow on a narrow screen.
  *
  * `(auth)` is a grouping folder, so it contributes nothing to the URL —
- * `(auth)/welcome/page.tsx` serves `/welcome`.
+ * `(auth)/sign-in/[[...sign-in]]/page.tsx` serves `/sign-in`.
  */
 export default function AuthLayout({ children }: LayoutProps<"/">) {
   return (

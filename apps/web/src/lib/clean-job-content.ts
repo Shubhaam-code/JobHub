@@ -9,9 +9,62 @@
 import { type ResolvedLink } from "./links";
 import type { PublicJob } from "./api";
 
-/** Chat/social hostnames and domains that must never appear in visible job content. */
-const CHAT_OR_SOCIAL_HOST_REGEX =
-  /(?:^|\/\/|\s)(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog|telegram\.org|wa\.me|whatsapp\.com|chat\.whatsapp\.com|api\.whatsapp\.com|instagram\.com|instagr\.am|facebook\.com|fb\.com|fb\.me|youtube\.com|youtu\.be|discord\.gg|discord\.com|twitter\.com|x\.com|threads\.net|reddit\.com)(?:\/[^\s<>()[\]{}"'`]*)?/gi;
+/**
+ * Chat/social domains whose links must never appear in visible job content.
+ *
+ * LinkedIn is deliberately absent: a LinkedIn job or company page is a genuine
+ * application destination, so blocking it would remove a working Apply link.
+ */
+const BLOCKED_LINK_HOSTS = [
+  "t.me",
+  "telegram.me",
+  "telegram.dog",
+  "telegram.org",
+  "wa.me",
+  "whatsapp.com",
+  "youtube.com",
+  "youtu.be",
+  "instagram.com",
+  "instagr.am",
+  "facebook.com",
+  "fb.com",
+  "fb.me",
+  "discord.gg",
+  "discord.com",
+  "twitter.com",
+  "x.com",
+  "threads.net",
+  "reddit.com",
+];
+
+const HOST_ALTERNATION = BLOCKED_LINK_HOSTS.map((host) => host.replace(/\./g, "\\.")).join("|");
+
+/** Any subdomain of a blocked host — `chat.whatsapp.com`, `www.youtube.com`, `m.youtu.be`. */
+const BLOCKED_HOST_PART = `(?:[a-z0-9-]+\\.)*(?:${HOST_ALTERNATION})`;
+const BLOCKED_PATH_PART = "(?:\\/[^\\s<>()\\[\\]{}\"'`]*)?";
+
+/**
+ * A blocked link anywhere in a line, with or without a scheme.
+ *
+ * Group 1 is the character in front of the URL. It is required — and put back by
+ * the replacement — for two reasons. It stops `t.me` matching inside an ordinary
+ * word such as `content.method`, and it anchors the match ahead of the scheme so
+ * the whole of `https://t.me/x` is removed rather than leaving a stranded
+ * `https:` behind in the visible text.
+ */
+const BLOCKED_LINK_REGEX = new RegExp(
+  `(^|[^A-Za-z0-9@._-])(?:(?:https?:)?\\/\\/)?${BLOCKED_HOST_PART}${BLOCKED_PATH_PART}`,
+  "gi",
+);
+
+/** A line that is nothing but a blocked link. */
+const BLOCKED_LINK_ONLY_REGEX = new RegExp(
+  `^(?:(?:https?:)?\\/\\/)?${BLOCKED_HOST_PART}${BLOCKED_PATH_PART}$`,
+  "i",
+);
+
+/** The platforms whose promotional prose is dropped along with their links. */
+const PLATFORM_WORDS = "whatsapp|telegram|youtube|instagram|facebook|discord";
 
 /** Promotional handle pattern like @channel, @admin, @careers */
 const PROMO_HANDLE_REGEX = /(?:^|\s)@([A-Za-z0-9_]{3,32})\b/g;
@@ -30,12 +83,36 @@ const PROMOTIONAL_LINE_PATTERNS = [
   /\btap\s+(?:here\s+)?to\s+join\b/i,
   /\bget\s+hired\b/i,
   /\blike\s*,\s*share\b/i,
-  /\b(?:all\s+the\s+best|best\s+of\s+luck|happy\s+applying)\b/i,
   /\bimportant\s+links?\s*[:\-]?\s*$/i,
   /\bwhatsapp\s+groups?\b/i,
   /\btelegram\s+channel\b/i,
   /\blinkedin\s+page\b/i,
   /\binstagram\s+page\b/i,
+  /\b(?:all\s+the\s+best|best\s+of\s+luck|happy\s+applying)\b/i,
+
+  /* The three shapes channel promotion actually takes: a platform next to a CTA
+     verb, a platform next to a community noun, or a platform name on its own as
+     a label for the link that sits after it. */
+  new RegExp(
+    `\\b(?:join|follow|subscribe|share|forward|visit|watch|check|ping|dm|connect)\\b[^\\n]{0,30}?\\b(?:${PLATFORM_WORDS})\\b`,
+    "i",
+  ),
+  new RegExp(
+    `\\b(?:${PLATFORM_WORDS})\\b[^\\n]{0,24}?\\b(?:group|groups|channel|channels|community|communities|page|link|links|handle|invite)\\b`,
+    "i",
+  ),
+  new RegExp(
+    `\\b(?:group|channel|community|page|invite)\\s*(?:link)?\\s*[:\\-\u2013\u2014]\\s*(?:${PLATFORM_WORDS})\\b`,
+    "i",
+  ),
+  new RegExp(
+    `^(?:${PLATFORM_WORDS})\\s*(?:group|channel|community|page|link)?\\s*[:\\-\u2013\u2014]?\\s*$`,
+    "i",
+  ),
+
+  /* What a stripped promo line leaves behind once its link is gone: a bare CTA
+     word, or a label whose only value was that link. */
+  /^(?:join|follow|subscribe|share|watch|visit|click|tap|dm|contact|apply|application|regist(?:er|ration)|links?|forms?|website)\b[\s:\-\u2013\u2014]*$/i,
 ];
 
 /** Check if a line is purely promotional or CTA noise. */
@@ -46,24 +123,9 @@ export function isPromotionalLine(line: string): boolean {
   // Pure divider or border lines
   if (/^[-=_*~•·#—–]{2,}$/.test(trimmed)) return true;
 
-  // Pure handle or contains chat links
+  // Pure handle, or a line that is only a chat/social link
   if (/^@[\w]+$/.test(trimmed)) return true;
-  if (
-    /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog|wa\.me|chat\.whatsapp\.com)\/[^\s]+$/i.test(
-      trimmed,
-    )
-  ) {
-    return true;
-  }
-
-  // Social link lines
-  if (
-    /^(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|facebook\.com|youtube\.com|discord\.gg|twitter\.com|x\.com)\/[^\s]+$/i.test(
-      trimmed,
-    )
-  ) {
-    return true;
-  }
+  if (BLOCKED_LINK_ONLY_REGEX.test(trimmed)) return true;
 
   // Social / Telegram handles and promotional CTAs
   for (const pattern of PROMOTIONAL_LINE_PATTERNS) {
@@ -75,10 +137,17 @@ export function isPromotionalLine(line: string): boolean {
 
 /** Strip promotional URLs, handles, and CTA fragments from a string. */
 export function sanitizeLineText(text: string): string {
-  let cleaned = text.replace(CHAT_OR_SOCIAL_HOST_REGEX, "").replace(PROMO_HANDLE_REGEX, "").trim();
+  let cleaned = text.replace(BLOCKED_LINK_REGEX, "$1").replace(PROMO_HANDLE_REGEX, "").trim();
 
   // Strip leading decorative bullet symbols / emojis
   cleaned = cleaned.replace(/^[\s🔹▪️•\-*👉📌📍📢🔥🚀✨💰🎓🏢💼]+\s*/u, "");
+
+  // Punctuation orphaned by a removed link: `Apply ()`, `Details -`, `a | b |`.
+  cleaned = cleaned
+    .replace(/\(\s*\)|\[\s*\]|\{\s*\}|<\s*>/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[|,;•·\u2013\u2014-]+\s*$/, "")
+    .trim();
 
   // Clean empty link labels left behind
   cleaned = cleaned.replace(
@@ -223,7 +292,10 @@ export function extractCleanJobDetails(job: PublicJob): CleanJobDetails {
     }
 
     const cleanedLine = sanitizeLineText(rawLine);
-    if (!cleanedLine) continue;
+    // Re-checked after stripping: removing a blocked link can turn a line that
+    // read as genuine ("Telegram: https://t.me/x") into the bare promo label
+    // underneath it, which should not survive into the description box.
+    if (!cleanedLine || isPromotionalLine(cleanedLine)) continue;
 
     // Check for email
     const emailMatch = cleanedLine.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/);
@@ -321,24 +393,7 @@ export function isGenuineApplyLink(link: ResolvedLink | null): boolean {
   try {
     const url = new URL(link.href);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    const chatOrSocialHosts = [
-      "t.me",
-      "telegram.me",
-      "telegram.dog",
-      "telegram.org",
-      "wa.me",
-      "whatsapp.com",
-      "chat.whatsapp.com",
-      "api.whatsapp.com",
-      "instagram.com",
-      "facebook.com",
-      "fb.com",
-      "youtube.com",
-      "youtu.be",
-      "discord.gg",
-      "discord.com",
-    ];
-    if (chatOrSocialHosts.some((h) => host === h || host.endsWith(`.${h}`))) {
+    if (BLOCKED_LINK_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) {
       return false;
     }
     return true;

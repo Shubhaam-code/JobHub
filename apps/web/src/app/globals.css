@@ -1,60 +1,78 @@
 @import "tailwindcss";
 
 /* ===========================================================================
-   Design tokens — refined in Phase 1.5 with ui-ux-pro-max
+   Design tokens
    ===========================================================================
-   Direction carried forward from Phase 1:
+   Direction:
      pattern    marketplace-directory (search-led discovery, then listings)
      style      Minimalism
-     type       "Corporate Trust" — Lexend headings + Source Sans 3 body
+     type       Lexend headings + Source Sans 3 body
 
-   What changed and why. `--domain color` returns two rows that fit this
-   product. Phase 1 took everything from the "Job Board/Recruitment" row,
-   including its surfaces: background #F0F9FF, foreground #0C4A6E, border
-   #BAE6FD. Tinting every surface, every body word and every hairline the same
-   sky hue is what made the page read as a template with one variable swapped.
+   The palette is orange-on-white, taken from the reference design: one warm
+   brand hue carrying the hero, every primary action and every active state,
+   against warm-neutral (stone) surfaces, text and hairlines. Hue is spent only
+   where it means something — orange for brand and action, green for a matched
+   result, red for an error.
 
-   So brand and action hues still come from the Job Board row, but surfaces,
-   text and borders now come from the same dataset's "B2B Service" row, which
-   is neutral slate. Hue is spent only where it carries meaning: primary for
-   brand and information, green for the apply action.
-
-   Every foreground/background pair below is >= 4.5:1 (skill rule
-   `color-accessible-pairs`); the ratios are noted inline.
+   Every foreground/background pair below is >= 4.5:1; the ratios are noted
+   inline. Orange is the one hue where that is tight, so it comes in two steps:
+     primary         filled surfaces (white text on it)
+     primary-strong  hover/pressed fills, AND orange *text* on a light surface
+   `text-primary` on `bg-background` is 4.4:1, which fails — so orange type on
+   the page background uses `primary-strong`. On white it may use either.
    =========================================================================== */
 
 @theme {
-  /* --- Brand + action ------------------------------------------------------
-     ui-ux-pro-max --domain color, "Job Board/Recruitment" row. The green is
-     darkened from the dataset's #16A34A, whose paired on-accent is black;
-     black-on-green reads cheap on a primary action and white on #16A34A is
-     only 3.3:1. */
-  --color-primary: #0369a1; /* white text 5.9:1 */
-  --color-primary-strong: #075985; /* hover/pressed — white text 7.6:1 */
+  /* --- Brand + action ---------------------------------------------------- */
+  --color-primary: #d24200; /* white text 4.65:1 */
+  --color-primary-strong: #a83500; /* hover/pressed fill — white 6.6:1; as text 6.3:1 on background */
   --color-on-primary: #ffffff;
+  /* Pale brand surface: tinted panels, active filter rows, hero wash.
+     `primary-strong` on it is 6.1:1. */
+  --color-primary-soft: #fff3ea;
+  /* Decorative only — 2.5:1 with white, so never a text background. Used for
+     gradient stops and the hero's illustrative shapes. */
+  --color-primary-bright: #ff6b2c;
+  /* The second illustrative hue, from the reference hero's yellow shape. Also
+     decorative only: 1.6:1 with white, so nothing readable is ever set on it.
+     Foreground text placed over it uses `foreground` (11.5:1). */
+  --color-decor-amber: #fbbf24;
+
+  /* Success confirmation only — the one place a second hue is allowed, so
+     "Resume parsed" cannot be mistaken for a brand or warning state. Match
+     scores and every other highlight use `primary`. Darkened from the usual
+     #16a34a, whose white text is only 3.3:1. */
   --color-accent: #15803d; /* white text 5.0:1 */
-  --color-accent-strong: #166534; /* resting label + hover fill — 6.4:1 on the /8 tint, 7.0:1 with white */
+  --color-accent-strong: #166534; /* resting label on the /10 tint — 6.4:1 */
   --color-on-accent: #ffffff;
 
-  /* Error/danger. The error state already referenced `destructive` utilities,
-     but no token backed them, so its border and tint resolved to transparent
-     and its icon inherited body colour. Red-700 rather than red-600 so the same
-     hue works as text on a light tint *and* as a filled surface:
-     6.5:1 on surface, 5.8:1 on its own 6% tint, 6.5:1 with white. */
+  /* Error/danger. Red-700 rather than red-600 so the same hue works as text on
+     a light tint *and* as a filled surface: 6.5:1 on surface, 5.8:1 on its own
+     6% tint, 6.5:1 with white. */
   --color-destructive: #b91c1c;
   --color-on-destructive: #ffffff;
 
-  /* --- Surfaces + text ----------------------------------------------------
-     ui-ux-pro-max --domain color, "B2B Service" row. */
-  --color-background: #f8fafc;
+  /* --- Surfaces + text ---------------------------------------------------
+     Warm neutrals (stone), so white cards read as warm-white against the page
+     rather than blue-grey next to an orange button. */
+  --color-background: #fafaf9;
   --color-surface: #ffffff;
-  --color-foreground: #0f172a; /* 17.0:1 on background */
-  --color-muted: #f1f5f9;
-  --color-muted-foreground: #475569; /* 7.6:1 on surface */
-  --color-subtle-foreground: #64748b; /* 4.8:1 on surface, 4.6:1 on background */
-  --color-border: #e2e8f0;
-  --color-border-strong: #cbd5e1; /* hover / emphasis hairline */
-  --color-ring: #0369a1;
+  --color-foreground: #1c1917; /* 16.7:1 on background */
+  --color-muted: #f5f5f4;
+  --color-muted-foreground: #57534e; /* 7.6:1 on surface, 7.3:1 on background */
+  --color-subtle-foreground: #78716c; /* 4.8:1 on surface, 4.6:1 on background */
+  --color-border: #e7e5e4;
+  --color-border-strong: #d6d3d1; /* hover / emphasis hairline */
+  --color-ring: #d24200; /* 4.4:1 against the page — above the 3:1 non-text rule */
+
+  /* --- Inverse (the admin sidebar) ---------------------------------------
+     The operator tool is the one dark surface in the product, which is what
+     separates it from the visitor-facing site at a glance. */
+  --color-inverse: #1a1614;
+  --color-inverse-elevated: #241f1c; /* hover / active nav row */
+  --color-inverse-border: #322c29;
+  --color-on-inverse: #ffffff; /* 18.0:1 */
+  --color-on-inverse-muted: #a8a29e; /* 7.1:1 */
 
   /* --- Geometry -----------------------------------------------------------
      One radius ramp, applied by role rather than by eye. Overrides Tailwind's
@@ -69,30 +87,26 @@
   --radius-xl: 1.25rem; /* 20px */
 
   /* --- Letter-spacing ------------------------------------------------------
-     Phase 1.5 set tracking inline per element, which drifted to five different
-     hand-picked values (-0.035, -0.03, -0.025, -0.015, +0.04, +0.06em). Optical
-     sizing is real — larger type wants tighter tracking — but it should be a
-     ramp applied by role, not a per-element guess, or the page reads as
-     assembled rather than set.
+     A ramp applied by role, not a per-element guess.
        display  the hero line only
        heading  section headings and the detail-page role
        snug     card titles and the wordmark
-       label    every uppercase micro-label and badge (was 0.04 and 0.06) */
+       label    every uppercase micro-label and badge */
   --tracking-display: -0.035em;
   --tracking-heading: -0.025em;
   --tracking-snug: -0.015em;
   --tracking-label: 0.06em;
 
   /* --- Elevation ----------------------------------------------------------
-     Skill rule `elevation-consistent`: a fixed scale, no ad-hoc shadows.
-     Slate-tinted and tight rather than large soft black blurs, so cards read
-     as sitting on the page instead of floating above it.
+     A fixed scale, no ad-hoc shadows. Warm-tinted and tight rather than large
+     soft black blurs, so cards read as sitting on the page instead of floating
+     above it.
        e1  resting cards, header once scrolled
        e2  card hover, search shell at rest
-       e3  search shell focused, mobile nav sheet */
-  --shadow-e1: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px -1px rgb(15 23 42 / 0.07);
-  --shadow-e2: 0 2px 4px -2px rgb(15 23 42 / 0.06), 0 8px 16px -6px rgb(15 23 42 / 0.1);
-  --shadow-e3: 0 4px 8px -4px rgb(15 23 42 / 0.06), 0 16px 32px -12px rgb(15 23 42 / 0.14);
+       e3  search shell focused, mobile nav sheet, dropdowns */
+  --shadow-e1: 0 1px 2px 0 rgb(28 25 23 / 0.04), 0 1px 3px -1px rgb(28 25 23 / 0.07);
+  --shadow-e2: 0 2px 4px -2px rgb(28 25 23 / 0.06), 0 8px 16px -6px rgb(28 25 23 / 0.1);
+  --shadow-e3: 0 4px 8px -4px rgb(28 25 23 / 0.06), 0 16px 32px -12px rgb(28 25 23 / 0.14);
 }
 
 @theme inline {
@@ -138,6 +152,14 @@
   /* The native control duplicates the component's own clear button. */
   input[type="search"]::-webkit-search-cancel-button {
     appearance: none;
+  }
+
+  /* Native radios and checkboxes carry the brand hue, which is what the filter
+     sidebar needs — and keeps them as real form controls rather than styled
+     divs, so keyboard and screen-reader behaviour is the platform's. */
+  input[type="radio"],
+  input[type="checkbox"] {
+    accent-color: var(--color-primary);
   }
 
   ::selection {

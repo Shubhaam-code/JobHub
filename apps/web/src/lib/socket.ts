@@ -4,8 +4,19 @@ import { useEffect } from "react";
 import { io, type Socket } from "socket.io-client";
 import { API_BASE_URL, type PublicJob } from "./api";
 
-export const SOCKET_URL =
-  process.env.NEXT_PUBLIC_SOCKET_URL || API_BASE_URL || "http://localhost:4000";
+/**
+ * Where the realtime connection goes.
+ *
+ * `NEXT_PUBLIC_SOCKET_URL` only needs setting when Socket.IO is served from a
+ * different origin than the REST API; it is the same Express server here, so the
+ * API origin is the default. No localhost fallback of its own — `API_BASE_URL` is
+ * already validated in `lib/api.ts`, which fails the production build when it is
+ * unset rather than letting a bad origin reach the browser.
+ */
+export const SOCKET_URL = (process.env.NEXT_PUBLIC_SOCKET_URL?.trim() || API_BASE_URL).replace(
+  /\/+$/,
+  "",
+);
 
 let globalSocket: Socket | null = null;
 
