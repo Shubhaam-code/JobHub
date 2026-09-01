@@ -107,13 +107,19 @@ function keylessGate(request: NextRequest) {
  * page anyone may read, and Clerk's flow re-enters its own `/sign-in` sub-paths
  * with a live session — the widget itself forwards them on.
  */
-const gate = clerkMiddleware(async (auth, request) => {
+const gate = clerkMiddleware(async (auth, req) => {
+  /* Clerk types this parameter through `Parameters<NextMiddleware>[0]`, resolved
+     from its own copy of `next`. npm keeps `next` under `apps/web/node_modules`
+     while `@clerk/nextjs` is hoisted to the root, so that lookup fails and the
+     parameter widens to `unknown`. Clerk hands the real `NextRequest` in at
+     runtime, so the narrowing is a resolution repair, not a claim about types. */
+  const request = req as NextRequest;
   const { pathname } = request.nextUrl;
   const { userId } = await auth();
 
   if (userId) return NextResponse.next();
 
-  return isPublic(pathname) ? NextResponse.next() : toEntry(request as NextRequest);
+  return isPublic(pathname) ? NextResponse.next() : toEntry(request);
 });
 
 export default configured ? gate : keylessGate;
