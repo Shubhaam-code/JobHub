@@ -28,5 +28,8 @@
     "concurrently": "^10.0.5",
     "eslint": "^9.39.5",
     "prettier": "^3.9.6"
+  },
+  "dependencies": {
+    "lightningcss": "^1.33.0"
   }
 }
