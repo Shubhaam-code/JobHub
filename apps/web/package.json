@@ -5,8 +5,8 @@
   "description": "Job & Internship Aggregator web client (Next.js). Phase 0 foundation.",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "node scripts/next-production.mjs build",
+    "start": "node scripts/next-production.mjs start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit"
   },
