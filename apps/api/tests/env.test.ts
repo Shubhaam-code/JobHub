@@ -10,7 +10,10 @@ describe('parseEnv', () => {
     expect(env.PORT).toBe(4000);
     expect(env.MONGODB_URI).toBe('mongodb://127.0.0.1:27017/job_aggregator');
     expect(env.LOG_LEVEL).toBe('info');
-    expect(env.corsOrigins).toEqual(['http://localhost:3000']);
+    expect(env.corsOrigins).toEqual([
+      'http://localhost:3000',
+      'https://job-hub-web-ochre.vercel.app',
+    ]);
     expect(env.isDevelopment).toBe(true);
     expect(env.isProduction).toBe(false);
     expect(env.isTest).toBe(false);

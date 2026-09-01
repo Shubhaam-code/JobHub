@@ -41,7 +41,7 @@ services:
       # a browser's Origin header must match one of these exactly or the frontend
       # gets a CORS error that reads like a frontend bug.
       - key: CORS_ORIGINS
-        value: https://job-hub-web-eight.vercel.app,https://jobhub-jubu-web.onrender.com
+        value: https://job-hub-web-ochre.vercel.app,https://jobhub-jubu-web.onrender.com
 
       # Signs the admin bearer tokens. Generated once by Render and then left
       # alone — rotating it invalidates every outstanding admin token.
@@ -108,7 +108,7 @@ services:
       # so it is committed rather than left for the dashboard; override it in the
       # dashboard to point a deploy at a different API.
       - key: NEXT_PUBLIC_API_URL
-        value: https://jobhub-1-9o99.onrender.com
+        value: https://jobhub-jubu.onrender.com
 
       # ── Clerk (user authentication) ─────────────────────────────────────────
       # Read on the server at request time by ClerkProvider and by src/proxy.ts,

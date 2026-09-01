@@ -166,11 +166,35 @@ async function buildFromLockup() {
 }
 
 /**
+ * How much of a tile the artwork occupies, per audience.
+ *
+ * `STANDARD` is the tab/home-screen figure: enough inset that the squares do not
+ * touch a rounded mask, which is what iOS applies to `apple-icon`.
+ *
+ * `MASKABLE` is smaller because Android may crop a maskable icon to any shape,
+ * and only guarantees a *circle* of 80% diameter survives. The largest square
+ * inscribed in that circle has a side of 0.8/sqrt(2) — about 56% — so artwork
+ * kept inside it is intact under a circle, squircle or rounded-square mask.
+ */
+const STANDARD_INSET = 0.78;
+const MASKABLE_INSET = 0.56;
+
+/**
  * The tab icon, from the square icon-only source.
  *
  * Its black matte is kept on purpose here: a favicon is composited against
  * browser chrome this code cannot see, and a solid dark tile stays legible in
  * both light and dark chrome. Padded to a square so no browser stretches it.
+ *
+ * The same matte is what makes these files valid PWA icons: an installable icon
+ * is composited against an OS-chosen background, and a maskable one must have no
+ * transparent corners at all or the mask cuts into empty pixels.
+ *
+ * `app/` and `public/` both get files because they are read by different things.
+ * Next fingerprints the two `app/` entries for cache-busting, so their URLs carry
+ * a hash that changes on every rebuild — fine for a <link> tag Next writes
+ * itself, useless in a manifest that names paths by hand. The `public/` copies
+ * keep the literal names `manifest.ts` refers to.
  */
 async function buildIcons() {
   const file = path.join(PUBLIC_DIR, 'logo.jpeg');
@@ -187,14 +211,19 @@ async function buildIcons() {
   });
 
   const written = [];
-  for (const [name, size] of [
-    ['icon.png', 512],
-    ['apple-icon.png', 180],
+  for (const [dir, name, size, ratio] of [
+    // Browser tab and iOS home screen, via Next's file conventions.
+    [APP_DIR, 'icon.png', 512, STANDARD_INSET],
+    [APP_DIR, 'apple-icon.png', 180, STANDARD_INSET],
+    // Named by `app/manifest.ts`. 192 and 512 are the two sizes the install
+    // criteria in Chromium look for; the maskable variant is what stops Android
+    // drawing our square inside its own white rounded tile.
+    [PUBLIC_DIR, 'icon-192.png', 192, STANDARD_INSET],
+    [PUBLIC_DIR, 'icon-512.png', 512, STANDARD_INSET],
+    [PUBLIC_DIR, 'icon-maskable-512.png', 512, MASKABLE_INSET],
   ]) {
-    // Artwork at 78% of the tile: enough inset that the squares do not touch a
-    // rounded mask, which is what iOS applies to `apple-icon`.
-    const inset = Math.round(size * 0.78);
-    const target = path.join(APP_DIR, name);
+    const inset = Math.round(size * ratio);
+    const target = path.join(dir, name);
 
     await sharp(file)
       .extract(box)

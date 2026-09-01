@@ -3,6 +3,7 @@ import { Lexend, Source_Sans_3 } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
+import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { CLERK_ENABLED } from "@/lib/clerk";
 
 /* "Corporate Trust" pairing from ui-ux-pro-max. Lexend is designed for reading
@@ -37,12 +38,35 @@ export const metadata: Metadata = {
 
      Those two files are square crops of the icon-only source, built by
      `scripts/logo-assets.mjs`. The wide lockup this used to point at was the
-     wrong shape for a 16px tab: browsers letterbox it and the wordmark smears. */
+     wrong shape for a 16px tab: browsers letterbox it and the wordmark smears.
+
+     No `manifest` key either, for the same reason: `app/manifest.ts` is a file
+     convention, and Next emits the <link rel="manifest"> tag from it. */
+
+  /* iOS does not read `display: standalone` from the manifest — Safari decides
+     whether an added-to-home-screen app opens in a browser chrome or without it
+     from these meta tags alone. Without them the icon on an iPhone home screen
+     opens a normal Safari tab, which is the whole thing users notice.
+
+     `default` status bar rather than `black-translucent`: the translucent style
+     draws the page *under* the status bar, and the sticky header in
+     `site-header.tsx` has no top inset to compensate, so the nav would sit
+     beneath the clock. */
+  appleWebApp: {
+    capable: true,
+    title: "JobHub",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  /* Tints the browser and OS chrome around the app. Matches `--color-surface`,
+     the header's fill, and the manifest's `theme_color` — the manifest value
+     covers the installed app, this one covers an ordinary tab, and they agree so
+     the two contexts look the same. */
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -68,6 +92,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           unconditionally, and `proxy.ts` refuses to serve a production
           deployment whose keys are missing. */}
       <body className="flex min-h-full flex-col" suppressHydrationWarning>
+        {/* Outside the Clerk conditional and rendering null, so it registers the
+            worker on both branches and adds no element to the flex column. */}
+        <ServiceWorkerRegistrar />
         {CLERK_ENABLED ? (
           <ClerkProvider
             dynamic

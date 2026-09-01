@@ -7,6 +7,28 @@ loadDotenvFile({ quiet: true });
 const DEFAULT_MONGODB_URI = 'mongodb://127.0.0.1:27017/job_aggregator';
 
 /**
+ * Origins allowed when `CORS_ORIGINS` is unset.
+ *
+ * Localhost is for development. The deployed frontend is here too, committed
+ * deliberately, because `requireInProduction` below cannot be relied on to catch
+ * an unset variable: it only fires when `NODE_ENV === 'production'`, and the
+ * deployed API runs with `NODE_ENV=development`, so an unset `CORS_ORIGINS`
+ * silently fell back to localhost-only and every browser call from the real
+ * frontend failed with a missing `Access-Control-Allow-Origin` — an error that
+ * reads like a frontend bug and is nowhere near its cause.
+ *
+ * An origin is not a secret: the browser sends it in a header on every request
+ * and it is visible in any network tab. This is not the authentication boundary
+ * either — the admin routes are gated by the HMAC bearer token in
+ * `requireAdmin`, and CORS only decides which *page* a browser will let read a
+ * response.
+ *
+ * Setting `CORS_ORIGINS` still replaces this list entirely, which is how a
+ * preview deployment or a renamed frontend points somewhere else.
+ */
+const DEFAULT_CORS_ORIGINS = 'http://localhost:3000,https://job-hub-web-ochre.vercel.app';
+
+/**
  * Telegram and LLM credentials are optional so the API still boots without
  * them, and a blank value in `.env` counts as "not set" rather than as invalid
  * input.
@@ -28,10 +50,10 @@ export const envSchema = z.object({
   /**
    * Comma-separated browser origins allowed to call the API, used for both the
    * REST routes and Socket.IO. Origins only — scheme and host, no path and no
-   * trailing slash (one is stripped anyway). Production must set this; the
-   * localhost default would reject the deployed frontend.
+   * trailing slash (one is stripped anyway). Setting this replaces
+   * `DEFAULT_CORS_ORIGINS` entirely rather than adding to it.
    */
-  CORS_ORIGINS: z.string().min(1).default('http://localhost:3000'),
+  CORS_ORIGINS: z.string().min(1).default(DEFAULT_CORS_ORIGINS),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 
   // Telegram (MTProto via GramJS). api_id/api_hash come from https://my.telegram.org.
@@ -277,17 +299,23 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     'set the mongodb+srv:// connection string of the deployed database',
   );
 
-  /* Checked as the *parsed* list rather than the raw string, so two different
-     mistakes are caught by one guard: an unset variable, which would silently
-     leave the localhost default in place, and a value holding no usable origin —
-     a stray comma, say. An empty allow-list rejects every browser request, which
-     from the outside reads as a frontend bug rather than a missing variable. */
-  requireInProduction(
-    source.CORS_ORIGINS === undefined ? undefined : corsOrigins.join(','),
-    data.NODE_ENV,
-    'CORS_ORIGINS',
-    'set the deployed frontend origin, e.g. https://your-app.vercel.app',
-  );
+  /* Only guards a value that *was* given and parses to nothing — a stray comma,
+     say. An empty allow-list rejects every browser request, which from the
+     outside reads as a frontend bug rather than a bad variable.
+
+     An unset variable is deliberately not a failure any more:
+     `DEFAULT_CORS_ORIGINS` carries the deployed frontend, so the fallback is
+     usable rather than localhost-only. Throwing here would mean that switching
+     the deployed API to `NODE_ENV=production` — which it should be — takes the
+     service down over a variable it no longer needs. */
+  if (source.CORS_ORIGINS !== undefined) {
+    requireInProduction(
+      corsOrigins.join(','),
+      data.NODE_ENV,
+      'CORS_ORIGINS',
+      'set the deployed frontend origin, e.g. https://your-app.vercel.app',
+    );
+  }
 
   return {
     ...data,

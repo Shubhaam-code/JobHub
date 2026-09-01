@@ -27,6 +27,27 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [{ source: "/recommended", destination: "/recommended-jobs", permanent: false }];
   },
+
+  /* The service worker is the one file in `public/` that must not be cached.
+     Next serves static files with a long `Cache-Control`, and a cached
+     `/sw.js` would pin users to the worker from the build they first visited:
+     the browser re-fetches it to check for updates, gets the cached copy back,
+     sees no byte difference and keeps the old one. A worker that cannot be
+     updated cannot be fixed or withdrawn.
+
+     Scoped to this one path — the global caching of every other asset is
+     untouched. */
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
