@@ -59,11 +59,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           leaves Next unable to stream the document shell.
 
           Rendered conditionally so the rest of the project still runs without
-          Clerk keys in development. The flag comes from a NEXT_PUBLIC_ variable,
-          which is inlined identically on the server and in the browser, so both
-          sides agree on the shape of this tree and hydration is unaffected. A
-          production build cannot reach the `false` branch — `lib/clerk.ts` throws
-          rather than let one be built. */}
+          Clerk keys in development. The flag is a build-time constant Next
+          inlines identically on the server and in the browser, so both sides
+          agree on the shape of this tree and hydration is unaffected. Production
+          never takes the `false` branch — `CLERK_ENABLED` is true there
+          unconditionally, and `proxy.ts` refuses to serve a production
+          deployment whose keys are missing. */}
       <body className="flex min-h-full flex-col">
         {CLERK_ENABLED ? (
           <ClerkProvider

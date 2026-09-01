@@ -1,7 +1,5 @@
-# Render blueprint for the API (apps/api).
-#
-# The web app is deployed separately on Vercel with Root Directory = apps/web —
-# see README "Deployment". Only the backend lives here.
+# Render blueprint for the whole monorepo: the API (apps/api) and the Next.js web
+# app (apps/web).
 #
 # Apply it from the Render dashboard: New → Blueprint → pick this repository.
 # Every `sync: false` variable below has to be filled in the dashboard on the
@@ -38,9 +36,12 @@ services:
       - key: MONGODB_URI
         sync: false
       # The deployed frontend origin(s), comma-separated, no trailing slash.
-      # e.g. https://your-app.vercel.app
+      # The Vercel deployment of apps/web, plus the jia-web service below for
+      # whichever of the two is actually serving. Add preview origins here too —
+      # a browser's Origin header must match one of these exactly or the frontend
+      # gets a CORS error that reads like a frontend bug.
       - key: CORS_ORIGINS
-        sync: false
+        value: https://job-hub-web-eight.vercel.app,https://jobhub-jubu-web.onrender.com
 
       # Signs the admin bearer tokens. Generated once by Render and then left
       # alone — rotating it invalidates every outstanding admin token.
@@ -81,3 +82,55 @@ services:
       # Every remaining variable in apps/api/.env.example (queue tuning, LLM
       # throttling, RESUME_MAX_BYTES, RECOMMENDATION_MIN_SCORE) has a working
       # default in src/config/env.ts. Add one here only to override it.
+
+  - type: web
+    name: jia-web
+    runtime: node
+    plan: free
+    region: singapore
+
+    # Build and start run from the repository root, not apps/web: npm has to see
+    # the workspaces to resolve `next` (it is hoisted to the root node_modules).
+    # `--include=dev` is required — `next` itself is a dependency, but the
+    # TypeScript and Tailwind toolchain `next build` invokes is in
+    # devDependencies, which npm omits once NODE_ENV=production is set below.
+    buildCommand: npm ci --include=dev && npm run build:web
+    # `next start` binds to the PORT Render injects; nothing to pass here.
+    startCommand: npm run start:web
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # ── Build-time: inlined into the browser bundle ─────────────────────────
+      # The origin of the API service above — scheme and host only, no trailing
+      # slash and no /api suffix (the client adds the paths itself). Not a secret,
+      # so it is committed rather than left for the dashboard; override it in the
+      # dashboard to point a deploy at a different API.
+      - key: NEXT_PUBLIC_API_URL
+        value: https://jobhub-jubu.onrender.com
+
+      # ── Clerk (user authentication) ─────────────────────────────────────────
+      # Read on the server at request time by ClerkProvider and by src/proxy.ts,
+      # so a runtime-only value is enough — the build no longer fails without
+      # them, but the app refuses to serve until both are set. Values come from
+      # the Clerk dashboard → API keys. Never commit them.
+      - key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+
+      # Point Clerk at our own pages instead of its hosted Account Portal.
+      - key: NEXT_PUBLIC_CLERK_SIGN_IN_URL
+        value: /sign-in
+      - key: NEXT_PUBLIC_CLERK_SIGN_UP_URL
+        value: /sign-up
+      - key: NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL
+        value: /
+      - key: NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL
+        value: /
+
+      # Only needed when Socket.IO is served from a different origin than the
+      # API; NEXT_PUBLIC_API_URL is used when it is unset.
+      # - key: NEXT_PUBLIC_SOCKET_URL
+      #   sync: false

@@ -14,22 +14,41 @@
  */
 const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
 
-/* Fail the production build rather than ship an app whose gate silently does
-   nothing. The root layout imports this module, so `next build` evaluates it
-   while rendering and stops here with a message naming the missing variable.
-   Development is left permissive on purpose: the feed, the job detail view and
-   the admin dashboard keep working without Clerk keys, so the rest of the
-   project stays runnable for anyone who has not set up a Clerk instance. */
-if (process.env.NODE_ENV === "production" && !publishableKey) {
-  throw new Error(
-    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is not set. User authentication cannot be " +
-      "enforced without it, so this build was stopped instead of producing an " +
-      "unauthenticated app. Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY " +
-      "(see apps/web/.env.example).",
-  );
-}
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
-export const CLERK_ENABLED = Boolean(publishableKey);
+/* This used to `throw` here, which made `next build` depend on the Clerk keys
+   being present in the *build* environment. That is not a safe assumption on a
+   host that only guarantees them at runtime (Render injects a service's
+   variables into the container; a Docker image or a preview build can be
+   produced without them), and it took the whole deploy down with the message
+   this file used to print.
+
+   The enforcement moved to the two places that can act on it: `next.config.ts`
+   warns once if the build environment has no key, and `proxy.ts` runs per
+   request and refuses to serve a production deployment whose keys are missing —
+   the same fail-closed guarantee, enforced where the keys actually have to
+   exist. Nothing in this module throws, because every static-generation worker
+   evaluates it. */
+
+/**
+ * Whether to render the Clerk tree.
+ *
+ * `true` unconditionally in production: a production deployment is required to
+ * have Clerk configured — `proxy.ts` refuses to serve one that does not — so the
+ * authentication flow is the same whether or not the key happened to be present
+ * when the bundle was compiled. This is what lets the key arrive at runtime:
+ * `ClerkProvider` is a server component that reads
+ * `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` from `process.env` per request and hands it
+ * to the browser as a prop, so nothing here needs the value inlined.
+ *
+ * Development stays keyed off the variable, so the feed, the job detail view and
+ * the admin dashboard keep working for a checkout with no Clerk instance.
+ *
+ * Both inputs are build-time constants that Next inlines identically into the
+ * server render and the browser bundle, so the two sides always agree and this
+ * cannot cause a hydration mismatch.
+ */
+export const CLERK_ENABLED = IS_PRODUCTION || Boolean(publishableKey);
 
 /* Where the entry flow lives. Kept here so the proxy, the landing page, the
    sign-in card and the sign-out redirect all agree on one spelling of each path.
@@ -56,9 +75,9 @@ export const SIGN_UP_PATH = "/sign-up";
  * It exists so the entry flow is complete for a checkout with no Clerk instance.
  * It persists across browser restarts until the visitor signs out, so the keyless
  * path behaves like the other two. With Clerk configured the real session takes
- * over and this is never read. A production build cannot reach this path at all —
- * `CLERK_ENABLED` is false only when the key is missing, which stops the build
- * above.
+ * over and this is never read. Production cannot reach this path at all —
+ * `CLERK_ENABLED` is true there unconditionally, and `proxy.ts` refuses to serve a
+ * production deployment whose keys are missing.
  */
 export const GUEST_COOKIE = "jia.guest";
 

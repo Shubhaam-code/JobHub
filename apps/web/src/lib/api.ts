@@ -6,28 +6,34 @@
  */
 const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
 
-/* Fail the production build rather than ship a bundle that points at the
-   developer's own machine. Because the value is inlined, an unset variable is not
-   a runtime fallback a deployment could recover from: every visitor would get
-   `http://localhost:4000`, which resolves to nothing on their machine and is
-   blocked as mixed content by the HTTPS page anyway. Stopping here names the
-   missing variable instead. Development keeps the localhost default so the
-   project stays runnable with no configuration — the same split as the Clerk
-   check in `lib/clerk.ts`. */
-if (process.env.NODE_ENV === "production" && !configuredApiUrl) {
-  throw new Error(
-    "NEXT_PUBLIC_API_URL is not set. The browser bundle would fall back to " +
-      "http://localhost:4000, so this build was stopped instead of producing a site " +
-      "that cannot reach its API. Set it to the deployed API origin — for example " +
-      "https://your-api.onrender.com (see apps/web/.env.example).",
-  );
-}
+/**
+ * The deployed API, used when `NEXT_PUBLIC_API_URL` is absent from a production
+ * build environment.
+ *
+ * This value is inlined into every visitor's bundle, so it cannot be recovered at
+ * runtime the way the Clerk keys can — an unset variable used to stop the build
+ * here, because the alternative was shipping `http://localhost:4000` to real
+ * browsers. A committed default is the better trade: it is not a secret (the
+ * origin is public the moment anyone opens the network tab), it is the origin this
+ * frontend is actually paired with, and it means a deploy on a host that did not
+ * get the variable set still reaches its API instead of failing the build.
+ *
+ * `NEXT_PUBLIC_API_URL` still wins when it is set, which is how a preview or a
+ * self-hosted deployment points somewhere else.
+ */
+const DEPLOYED_API_URL = "https://jobhub-jubu.onrender.com";
+
+/* Development keeps the localhost default so the project stays runnable with no
+   configuration; production falls back to the deployed API rather than to a
+   machine the visitor does not have. */
+const fallbackApiUrl =
+  process.env.NODE_ENV === "production" ? DEPLOYED_API_URL : "http://localhost:4000";
 
 /**
  * Origin of the API, normalized without a trailing slash so everything built on
  * it — `apiUrl()` and the Socket.IO URL in `lib/socket.ts` — joins cleanly.
  */
-export const API_BASE_URL = (configuredApiUrl ?? "http://localhost:4000").replace(/\/+$/, "");
+export const API_BASE_URL = (configuredApiUrl || fallbackApiUrl).replace(/\/+$/, "");
 
 export interface ApiHealth {
   status: string;
