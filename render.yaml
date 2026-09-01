@@ -35,13 +35,20 @@ services:
       # mongodb+srv://... from Atlas. The API refuses to boot without it.
       - key: MONGODB_URI
         sync: false
-      # The deployed frontend origin(s), comma-separated, no trailing slash.
-      # The Vercel deployment of apps/web, plus the jia-web service below for
-      # whichever of the two is actually serving. Add preview origins here too —
-      # a browser's Origin header must match one of these exactly or the frontend
-      # gets a CORS error that reads like a frontend bug.
+      # Extra browser origins, comma-separated, no trailing slash. This ADDS to
+      # the origins built into src/config/env.ts (localhost, the Vercel frontend
+      # and the jia-web service below) rather than replacing them, so leaving it
+      # unset is fine and a stale value here can no longer take the frontend
+      # offline. Set it only for an origin this repo does not already know about:
+      # a preview deployment, or a custom domain.
+      #
+      # It replaced the built-in list once, and a dashboard value that omitted the
+      # live frontend meant every browser call got a 200 with no
+      # Access-Control-Allow-Origin — the site showed an empty feed while the API
+      # logged nothing but successful requests. The API now prints its resolved
+      # allow-list at startup; grep the deploy log for "CORS allow-list".
       - key: CORS_ORIGINS
-        value: https://job-hub-web-ochre.vercel.app,https://jobhub-jubu-web.onrender.com
+        sync: false
 
       # Signs the admin bearer tokens. Generated once by Render and then left
       # alone — rotating it invalidates every outstanding admin token.

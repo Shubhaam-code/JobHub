@@ -8,6 +8,10 @@
 
 import { createRequire } from 'node:module';
 
+/* Type-only, so it is erased at compile time and pulls nothing in at runtime —
+   the whole point of the comment on `loadPdfParse` below. */
+import type { PDFParse } from 'pdf-parse';
+
 import { logger } from '../lib/logger.js';
 
 export type PdfTextResult = { ok: true; text: string } | { ok: false; reason: string };
@@ -36,7 +40,7 @@ export type PdfTextResult = { ok: true; text: string } | { ok: false; reason: st
  *     an unhandled throw, so the worst case is "resume parsing is down", never
  *     "the API is down".
  */
-type PdfParseModule = typeof import('pdf-parse');
+type PdfParseConstructor = typeof PDFParse;
 
 /**
  * Stand-ins for the browser globals pdfjs polyfills from `@napi-rs/canvas`.
@@ -93,15 +97,16 @@ function installBrowserGlobals(): void {
 }
 
 /** Memoized so the globals are installed and the module resolved only once. */
-let pdfParseModule: Promise<PdfParseModule> | null = null;
+let pdfParseConstructor: Promise<PdfParseConstructor> | null = null;
 
-function loadPdfParse(): Promise<PdfParseModule> {
-  pdfParseModule ??= (async () => {
+function loadPdfParse(): Promise<PdfParseConstructor> {
+  pdfParseConstructor ??= (async () => {
     installBrowserGlobals();
-    return import('pdf-parse');
+    const pdfParse = await import('pdf-parse');
+    return pdfParse.PDFParse;
   })();
 
-  return pdfParseModule;
+  return pdfParseConstructor;
 }
 
 /**
@@ -183,10 +188,10 @@ export async function extractPdfText(data: Buffer): Promise<PdfTextResult> {
     return { ok: false, reason: 'That file is not a PDF. Please upload your resume as a PDF.' };
   }
 
-  let PDFParse: PdfParseModule['PDFParse'];
+  let Parser: PdfParseConstructor;
 
   try {
-    ({ PDFParse } = await loadPdfParse());
+    Parser = await loadPdfParse();
   } catch (error: unknown) {
     /* A broken deployment, not a bad upload — so it is logged at error level and
        the caller still gets a 400 it can render. The alternative used to be this
@@ -203,7 +208,7 @@ export async function extractPdfText(data: Buffer): Promise<PdfTextResult> {
     };
   }
 
-  const parser = new PDFParse({ data: new Uint8Array(data) });
+  const parser = new Parser({ data: new Uint8Array(data) });
 
   try {
     const result = await parser.getText();
