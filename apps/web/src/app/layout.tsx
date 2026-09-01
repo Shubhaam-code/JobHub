@@ -46,8 +46,10 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  const htmlClasses = [lexend.variable, sourceSans.variable, "h-full", "antialiased"].join(" ");
+  
   return (
-    <html lang="en" className={`${lexend.variable} ${sourceSans.variable} h-full antialiased`}>
+    <html lang="en" className={htmlClasses} suppressHydrationWarning>
       {/* Header and footer used to be assembled here, which gave them to every
           route — including the sign-in pages, where the nav points at feed
           sections that are not on the page. They now live in `(app)/layout.tsx`,
@@ -65,9 +67,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           never takes the `false` branch — `CLERK_ENABLED` is true there
           unconditionally, and `proxy.ts` refuses to serve a production
           deployment whose keys are missing. */}
-      <body className="flex min-h-full flex-col">
+      <body className="flex min-h-full flex-col" suppressHydrationWarning>
         {CLERK_ENABLED ? (
           <ClerkProvider
+            dynamic
             /* Signing out lands on the landing page — the same place the proxy
                would send them next, so there is one navigation instead of two,
                and it is a page a signed-out visitor is allowed to read. Set on
@@ -100,3 +103,4 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     </html>
   );
 }
+
