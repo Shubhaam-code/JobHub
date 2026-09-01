@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { parseEnv } from '../src/config/env.js';
 
+const BUILT_IN_ORIGINS = [
+  'http://localhost:3000',
+  'https://job-hub-web-ochre.vercel.app',
+  'https://jobhub-jubu-web.onrender.com',
+];
+
 describe('parseEnv', () => {
   it('falls back to development defaults', () => {
     const env = parseEnv({});
@@ -10,10 +16,7 @@ describe('parseEnv', () => {
     expect(env.PORT).toBe(4000);
     expect(env.MONGODB_URI).toBe('mongodb://127.0.0.1:27017/job_aggregator');
     expect(env.LOG_LEVEL).toBe('info');
-    expect(env.corsOrigins).toEqual([
-      'http://localhost:3000',
-      'https://job-hub-web-ochre.vercel.app',
-    ]);
+    expect(env.corsOrigins).toEqual(BUILT_IN_ORIGINS);
     expect(env.isDevelopment).toBe(true);
     expect(env.isProduction).toBe(false);
     expect(env.isTest).toBe(false);
@@ -23,10 +26,38 @@ describe('parseEnv', () => {
     expect(parseEnv({ PORT: '8080' }).PORT).toBe(8080);
   });
 
-  it('splits and trims CORS_ORIGINS into a list', () => {
+  it('splits and trims CORS_ORIGINS, adding them to the built-in origins', () => {
     const env = parseEnv({ CORS_ORIGINS: 'http://a.test, http://b.test ,' });
 
-    expect(env.corsOrigins).toEqual(['http://a.test', 'http://b.test']);
+    expect(env.corsOrigins).toEqual([...BUILT_IN_ORIGINS, 'http://a.test', 'http://b.test']);
+  });
+
+  it('strips a trailing slash, which no Origin header ever carries', () => {
+    const env = parseEnv({ CORS_ORIGINS: 'https://preview.test/' });
+
+    expect(env.corsOrigins).toContain('https://preview.test');
+  });
+
+  /* The regression this guards: CORS_ORIGINS used to replace the built-in list,
+     so a deployment whose value omitted the live frontend served every browser a
+     response with no `Access-Control-Allow-Origin`. The site emptied out while the
+     API logged nothing but successful requests. */
+  it.each([
+    ['a value that omits the deployed frontend', 'https://somewhere-else.test'],
+    ['an empty value', ''],
+    ['a value that is nothing but separators', ' , ,'],
+  ])('keeps the deployed frontend allowed given %s', (_case, CORS_ORIGINS) => {
+    expect(parseEnv({ CORS_ORIGINS }).corsOrigins).toEqual(
+      expect.arrayContaining(BUILT_IN_ORIGINS),
+    );
+  });
+
+  it('never lists an origin twice, even when CORS_ORIGINS repeats a built-in one', () => {
+    const origins = parseEnv({
+      CORS_ORIGINS: 'https://job-hub-web-ochre.vercel.app/',
+    }).corsOrigins;
+
+    expect(origins).toEqual([...new Set(origins)]);
   });
 
   it('accepts a mongodb+srv connection string', () => {

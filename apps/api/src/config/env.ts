@@ -7,26 +7,25 @@ loadDotenvFile({ quiet: true });
 const DEFAULT_MONGODB_URI = 'mongodb://127.0.0.1:27017/job_aggregator';
 
 /**
- * Origins allowed when `CORS_ORIGINS` is unset.
+ * Origins this project's own frontends are served from.
  *
- * Localhost is for development. The deployed frontend is here too, committed
- * deliberately, because `requireInProduction` below cannot be relied on to catch
- * an unset variable: it only fires when `NODE_ENV === 'production'`, and the
- * deployed API runs with `NODE_ENV=development`, so an unset `CORS_ORIGINS`
- * silently fell back to localhost-only and every browser call from the real
- * frontend failed with a missing `Access-Control-Allow-Origin` — an error that
- * reads like a frontend bug and is nowhere near its cause.
+ * These are always allowed, whether or not `CORS_ORIGINS` is set — see
+ * `resolveCorsOrigins` for why merging beats replacing. Localhost is for
+ * development; the rest are the deployed frontends (Vercel, and the `jia-web`
+ * service in render.yaml).
  *
  * An origin is not a secret: the browser sends it in a header on every request
  * and it is visible in any network tab. This is not the authentication boundary
  * either — the admin routes are gated by the HMAC bearer token in
- * `requireAdmin`, and CORS only decides which *page* a browser will let read a
- * response.
- *
- * Setting `CORS_ORIGINS` still replaces this list entirely, which is how a
- * preview deployment or a renamed frontend points somewhere else.
+ * `requireAdmin`, CORS is not configured with `credentials`, so no cookie rides
+ * along, and the jobs feed these origins can read is public regardless. What CORS
+ * decides here is only which *page* a browser will let read a response.
  */
-const DEFAULT_CORS_ORIGINS = 'http://localhost:3000,https://job-hub-web-ochre.vercel.app';
+const BUILT_IN_CORS_ORIGINS = [
+  'http://localhost:3000',
+  'https://job-hub-web-ochre.vercel.app',
+  'https://jobhub-jubu-web.onrender.com',
+];
 
 /**
  * Telegram and LLM credentials are optional so the API still boots without
@@ -48,12 +47,15 @@ export const envSchema = z.object({
     .regex(/^mongodb(\+srv)?:\/\/.+/, 'must start with mongodb:// or mongodb+srv://')
     .default(DEFAULT_MONGODB_URI),
   /**
-   * Comma-separated browser origins allowed to call the API, used for both the
-   * REST routes and Socket.IO. Origins only — scheme and host, no path and no
-   * trailing slash (one is stripped anyway). Setting this replaces
-   * `DEFAULT_CORS_ORIGINS` entirely rather than adding to it.
+   * Extra browser origins allowed to call the API, comma-separated, used for both
+   * the REST routes and Socket.IO. Origins only — scheme and host, no path and no
+   * trailing slash (one is stripped anyway).
+   *
+   * This *adds to* `BUILT_IN_CORS_ORIGINS` rather than replacing it, so set it
+   * only for origins this repo does not already know about: a preview
+   * deployment, a custom domain, a fork's frontend.
    */
-  CORS_ORIGINS: z.string().min(1).default(DEFAULT_CORS_ORIGINS),
+  CORS_ORIGINS: z.string().default(''),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 
   // Telegram (MTProto via GramJS). api_id/api_hash come from https://my.telegram.org.
@@ -230,6 +232,26 @@ function parseOriginList(raw: string): string[] {
 }
 
 /**
+ * The allow-list: this project's own frontends, plus whatever `CORS_ORIGINS` adds.
+ *
+ * `CORS_ORIGINS` used to *replace* the built-in list, and that is the bug this
+ * merge fixes. The deployed API's dashboard value did not include the live
+ * frontend, so `Access-Control-Allow-Origin` was absent from every response and
+ * the browser discarded data the API had already produced: `curl` saw all 453
+ * jobs, the site showed an empty feed, and nothing in the logs mentioned CORS.
+ * Only `/welcome` had content, because it fetches server-side where CORS does not
+ * apply — which made it look like a frontend rendering bug.
+ *
+ * Merging removes the failure mode entirely: a stale or misspelled variable can
+ * no longer take the frontend offline, only fail to add an origin. Restricting
+ * the deployed frontends is not a thing this variable can do any more, which is
+ * the intended trade — see `BUILT_IN_CORS_ORIGINS` for why that costs nothing.
+ */
+function resolveCorsOrigins(raw: string): string[] {
+  return parseOriginList([...BUILT_IN_CORS_ORIGINS, raw].join(','));
+}
+
+/**
  * Resolves the token signing key. Missing AUTH_SECRET is fatal in production —
  * a guessable key there would make admin tokens forgeable — and a warning
  * everywhere else, so tests and local development need no configuration.
@@ -290,7 +312,7 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   }
 
   const data = result.data;
-  const corsOrigins = parseOriginList(data.CORS_ORIGINS);
+  const corsOrigins = resolveCorsOrigins(data.CORS_ORIGINS);
 
   requireInProduction(
     source.MONGODB_URI,
@@ -299,23 +321,10 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     'set the mongodb+srv:// connection string of the deployed database',
   );
 
-  /* Only guards a value that *was* given and parses to nothing — a stray comma,
-     say. An empty allow-list rejects every browser request, which from the
-     outside reads as a frontend bug rather than a bad variable.
-
-     An unset variable is deliberately not a failure any more:
-     `DEFAULT_CORS_ORIGINS` carries the deployed frontend, so the fallback is
-     usable rather than localhost-only. Throwing here would mean that switching
-     the deployed API to `NODE_ENV=production` — which it should be — takes the
-     service down over a variable it no longer needs. */
-  if (source.CORS_ORIGINS !== undefined) {
-    requireInProduction(
-      corsOrigins.join(','),
-      data.NODE_ENV,
-      'CORS_ORIGINS',
-      'set the deployed frontend origin, e.g. https://your-app.vercel.app',
-    );
-  }
+  /* No production check on CORS_ORIGINS any more: it is purely additive now, so
+     an unset, empty or comma-mangled value cannot produce an empty allow-list —
+     `BUILT_IN_CORS_ORIGINS` is always in it. There is nothing left here that
+     could take the frontend down, so there is nothing to refuse to boot over. */
 
   return {
     ...data,

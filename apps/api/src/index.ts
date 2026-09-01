@@ -8,6 +8,7 @@ import { logger } from './lib/logger.js';
 import { closeSocketServer, initSocketServer } from './lib/socket.js';
 import { recoverStaleClaims } from './queue/ingest-queue.js';
 import { startQueueWorker, type QueueWorker } from './queue/worker.js';
+import { warmPdfParser } from './resume/pdf-text.js';
 import { ensureConfiguredChannels } from './telegram/channel-registry.js';
 import { createTelegramClient } from './telegram/client.js';
 import { startListener, type ListenerHandle } from './telegram/listener.js';
@@ -47,6 +48,12 @@ async function shutdown(server: HttpServer, signal: string): Promise<void> {
 async function main(): Promise<void> {
   logger.info(`Starting API (env=${env.NODE_ENV}, log level=${env.LOG_LEVEL}).`);
   logger.info(`MongoDB target: ${redactUri(env.MONGODB_URI)}`);
+  /* Logged because its absence is invisible from the outside: a browser origin
+     that is not on this list gets a 200 with no `Access-Control-Allow-Origin`,
+     the browser throws the response away, and the API logs a perfectly ordinary
+     successful request. Printing the list turns "the site shows no data" into a
+     one-line check. */
+  logger.info(`CORS allow-list: ${env.corsOrigins.join(', ')}`);
 
   await connectDatabase();
 
@@ -71,6 +78,11 @@ async function main(): Promise<void> {
 
   const app = createApp();
   const server = http.createServer(app);
+
+  /* Deliberately not awaited: pdfjs takes seconds to evaluate and nothing about
+     serving jobs depends on it, so it loads alongside the rest of startup. It
+     logs its own failure and never rejects. */
+  void warmPdfParser();
 
   // Initialize Socket.IO attached to the HTTP server
   initSocketServer(server);

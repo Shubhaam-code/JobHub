@@ -26,8 +26,54 @@ describe('GET /health', () => {
   });
 });
 
-describe('GET /health/ready', () => {
-  // createApp() never calls connectDatabase(), so readiness is deterministically
+/**
+ * A missing `Access-Control-Allow-Origin` is the quietest possible outage: the
+ * API answers 200 with the right body, the browser throws it away, and the
+ * request log shows a success. That happened in production and emptied the whole
+ * site, so the header is asserted directly here.
+ */
+describe('CORS', () => {
+  const DEPLOYED_FRONTEND = 'https://job-hub-web-ochre.vercel.app';
+
+  it('allows the deployed frontend to read a response', async () => {
+    const response = await request(app).get('/health').set('Origin', DEPLOYED_FRONTEND);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBe(DEPLOYED_FRONTEND);
+  });
+
+  it('answers the browser preflight for a real API call', async () => {
+    const response = await request(app)
+      .options('/api/v1/jobs')
+      .set('Origin', DEPLOYED_FRONTEND)
+      .set('Access-Control-Request-Method', 'GET');
+
+    expect(response.status).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe(DEPLOYED_FRONTEND);
+  });
+
+  it('allows localhost, so development is not blocked either', async () => {
+    const response = await request(app).get('/health').set('Origin', 'http://localhost:3000');
+
+    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+  });
+
+  it('withholds the header from an origin that is not ours', async () => {
+    const response = await request(app).get('/health').set('Origin', 'https://evil.test');
+
+    // Still served — the header, not the response, is what CORS withholds.
+    expect(response.status).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('serves callers that send no Origin at all, like curl and health probes', async () => {
+    const response = await request(app).get('/health');
+
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('GET /health/ready', () => {  // createApp() never calls connectDatabase(), so readiness is deterministically
   // "not-ready" here whether or not a mongod happens to be running locally.
   it('reports not-ready until a database connection is established', async () => {
     const response = await request(app).get('/health/ready');

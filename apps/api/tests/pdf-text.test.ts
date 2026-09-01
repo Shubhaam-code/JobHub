@@ -1,9 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
-import { extractPdfText } from '../src/resume/pdf-text.js';
+import { extractPdfText, warmPdfParser } from '../src/resume/pdf-text.js';
 import { makePdf, SAMPLE_RESUME_LINES } from './helpers/make-pdf.js';
 
 describe('extractPdfText', () => {
+  /* pdfjs is loaded on demand (see the comment in pdf-text.ts), and evaluating it
+     takes seconds. The API pays that at boot; without this the bill would land on
+     whichever test happened to parse first and read as a timeout in that test. */
+  beforeAll(async () => {
+    expect(await warmPdfParser()).toBe(true);
+  }, 60_000);
+
   it('reads the text back out of a real PDF', async () => {
     const result = await extractPdfText(makePdf(SAMPLE_RESUME_LINES));
 
