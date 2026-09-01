@@ -21,7 +21,7 @@ const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
  * `NEXT_PUBLIC_API_URL` still wins when it is set, which is how a preview or a
  * self-hosted deployment points somewhere else.
  */
-const DEPLOYED_API_URL = "https://jobhub-jubu.onrender.com";
+const DEPLOYED_API_URL = "https://jobhub-1-9o99.onrender.com";
 
 /* Development keeps the localhost default so the project stays runnable with no
    configuration; production falls back to the deployed API rather than to a

@@ -108,7 +108,7 @@ services:
       # so it is committed rather than left for the dashboard; override it in the
       # dashboard to point a deploy at a different API.
       - key: NEXT_PUBLIC_API_URL
-        value: https://jobhub-jubu.onrender.com
+        value: https://jobhub-1-9o99.onrender.com
 
       # ── Clerk (user authentication) ─────────────────────────────────────────
       # Read on the server at request time by ClerkProvider and by src/proxy.ts,
