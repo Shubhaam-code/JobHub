@@ -187,7 +187,7 @@ function Cutouts() {
           height={1122}
           sizes="(min-width: 1024px) 22vw, 44vw"
           priority
-          className="h-auto w-full -translate-y-26 relative left-10 scale-90"
+          className="h-auto w-full -translate-y-24 relative left-10 scale-90"
         />
       </div>
 
@@ -199,7 +199,7 @@ function Cutouts() {
           height={1172}
           sizes="(min-width: 1024px) 22vw, 42vw"
           priority
-          className="h-auto w-full -translate-y-22 relative left-0 scale-90"
+          className="h-auto w-full -translate-y-20 relative left-0 scale-90"
         />
       </div>
     </div>
@@ -386,7 +386,7 @@ function LiveCountPill({ total }: { total: number }) {
  */
 function NotifyBand() {
   return (
-    <div className="mt-6 flex flex-col gap-4 rounded-xl border border-border bg-surface/70 p-4 sm:mt-7 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:p-5 lg:-mt-21 lg:px-6 lg:py-5">
+    <div className="mt-6 flex flex-col gap-4 rounded-xl border border-border bg-surface/70 p-4 sm:mt-7 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:p-5 lg:-mt-20 lg:px-6 lg:py-5">
       <div className="flex items-start gap-3 lg:gap-3.5">
         <span
           aria-hidden="true"

@@ -83,13 +83,13 @@ function toEntry(request: NextRequest) {
  * and grants only the public feed. Unreachable in production: the missing key
  * throws above.
  */
-const keylessGate: NextMiddleware = (request) => {
+function keylessGate(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (request.cookies.has(GUEST_COOKIE)) return NextResponse.next();
 
   return isPublic(pathname) ? NextResponse.next() : toEntry(request);
-};
+}
 
 /**
  * One redirect, landing on a path the gate itself leaves alone — that is why
@@ -113,7 +113,7 @@ const gate = clerkMiddleware(async (auth, request) => {
 
   if (userId) return NextResponse.next();
 
-  return isPublic(pathname) ? NextResponse.next() : toEntry(request);
+  return isPublic(pathname) ? NextResponse.next() : toEntry(request as NextRequest);
 });
 
 export default configured ? gate : keylessGate;
