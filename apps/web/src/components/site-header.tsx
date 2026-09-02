@@ -75,7 +75,7 @@ export function SiteHeader() {
 
       {/* 64px on mobile, 72px from lg — the taller bar gives the 44px mark real
           breathing room without tipping into an oversized nav. */}
-      <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-5 px-4 sm:gap-8 sm:px-6 lg:h-18 lg:px-8">
+      <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-3 sm:gap-5 sm:px-4 md:gap-8 md:px-6 lg:h-18 lg:px-8">
         <Link
           href="/"
           className="group flex min-h-11 shrink-0 items-center rounded-md"
@@ -96,7 +96,7 @@ export function SiteHeader() {
             height={359}
             sizes="145px"
             priority
-            className="h-8 w-auto shrink-0 lg:h-9"
+            className="h-7 w-auto shrink-0 sm:h-8 lg:h-9"
           />
         </Link>
 
@@ -196,7 +196,7 @@ export function SiteHeader() {
             className="overflow-hidden border-t border-border bg-surface shadow-e3 md:hidden"
           >
             <nav aria-label="Mobile">
-              <ul className="mx-auto flex w-full max-w-6xl flex-col gap-1 px-4 py-3 sm:px-6">
+              <ul className="mx-auto flex w-full max-w-6xl flex-col gap-1 px-3 py-3 sm:px-4 sm:py-3 md:px-6">
                 {NAV_LINKS.map((link) => {
                   const active = isActive(link.href);
                   return (

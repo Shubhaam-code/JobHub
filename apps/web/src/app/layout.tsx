@@ -91,7 +91,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           never takes the `false` branch — `CLERK_ENABLED` is true there
           unconditionally, and `proxy.ts` refuses to serve a production
           deployment whose keys are missing. */}
-      <body className="flex min-h-full flex-col" suppressHydrationWarning>
+      <body className="flex min-h-full flex-col overflow-x-hidden" suppressHydrationWarning>
         {/* Outside the Clerk conditional and rendering null, so it registers the
             worker on both branches and adds no element to the flex column. */}
         <ServiceWorkerRegistrar />

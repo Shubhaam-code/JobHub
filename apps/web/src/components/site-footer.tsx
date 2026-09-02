@@ -13,8 +13,8 @@ const FOOTER_LINKS = [
 export function SiteFooter() {
   return (
     <footer className="mt-auto border-t border-border bg-surface">
-      <div className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between sm:gap-16">
+      <div className="mx-auto w-full max-w-6xl px-3 py-8 sm:px-4 sm:py-12 lg:px-8">
+        <div className="flex flex-col gap-6 sm:gap-10 sm:flex-row sm:items-start sm:justify-between sm:gap-16">
           <div className="max-w-sm">
             {/* Same lockup and height as the header, so the brand reads as one
                 treatment rather than two similar ones. `alt` carries the name
@@ -26,9 +26,9 @@ export function SiteFooter() {
               width={1446}
               height={359}
               sizes="129px"
-              className="h-8 w-auto"
+              className="h-7 w-auto sm:h-8"
             />
-            <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground sm:mt-4 sm:text-sm">
               Jobs and internships from public channels, listed by role, batch and location.
             </p>
           </div>
@@ -36,15 +36,15 @@ export function SiteFooter() {
           <nav aria-label="Footer">
             {/* A <p>, not a heading: an 11px micro-label announced as "heading
                 level 2" would overstate it, and the nav is already labelled. */}
-            <p className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
+            <p className="text-[10px] font-semibold tracking-label text-subtle-foreground uppercase sm:text-[11px]">
               Browse
             </p>
-            <ul className="mt-3 flex flex-col gap-0.5 sm:items-end">
+            <ul className="mt-2 flex flex-col gap-0.5 sm:mt-3 sm:items-end">
               {FOOTER_LINKS.map((link) => (
                 <li key={link.label} className="sm:self-end">
                   <Link
                     href={link.href}
-                    className="inline-flex min-h-11 min-w-11 items-center text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground pointer-fine:min-h-9 sm:justify-end"
+                    className="inline-flex min-h-9 min-w-9 items-center text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground sm:min-h-11 sm:min-w-11 sm:text-sm pointer-fine:min-h-9 sm:justify-end"
                   >
                     {link.label}
                   </Link>
@@ -54,7 +54,7 @@ export function SiteFooter() {
           </nav>
         </div>
 
-        <p className="mt-10 border-t border-border pt-6 text-xs text-subtle-foreground">
+        <p className="mt-6 border-t border-border pt-4 text-[11px] text-subtle-foreground sm:mt-10 sm:pt-6 sm:text-xs">
           © {new Date().getFullYear()} JobFeed. Real-time opportunity aggregator.
         </p>
       </div>
