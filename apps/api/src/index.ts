@@ -15,34 +15,123 @@ import { startListener, type ListenerHandle } from './telegram/listener.js';
 
 let telegramListener: ListenerHandle | null = null;
 let queueWorker: QueueWorker | null = null;
+let shuttingDown = false;
+
+/** Hard ceiling on the whole teardown; past it the process is killed outright. */
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+/** Per-step ceiling, so one slow subsystem cannot eat the whole budget. */
+const STEP_TIMEOUT_MS = 5_000;
+
+/**
+ * Runs `task`, but gives up after `ms` instead of blocking teardown forever.
+ *
+ * `queueWorker.stop()` waits for the in-flight message, and that message may be
+ * inside an LLM call or a rate-limit sleep — up to a minute. Waiting for it
+ * while the HTTP server still holds the port is what produced the EADDRINUSE
+ * crash loop under `tsx watch`.
+ */
+async function withTimeout(label: string, ms: number, task: Promise<unknown>): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+
+  const expired = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), ms);
+    timer.unref?.();
+  });
+
+  try {
+    const result = await Promise.race([task.then(() => 'done' as const), expired]);
+    if (result === 'timeout') logger.warn(`${label} did not finish in ${ms}ms — leaving it.`);
+  } catch (err) {
+    logger.warn(`Error during ${label}`, err);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 async function shutdown(server: HttpServer, signal: string): Promise<void> {
   logger.info(`Received ${signal} — shutting down.`);
+
+  /* The port goes first, before anything that can block. `tsx watch` (and Render)
+     start the replacement process as soon as the signal is sent, so every extra
+     millisecond spent holding :PORT is a millisecond the new process can lose to
+     EADDRINUSE.
+
+     server.close() stops the listener immediately — the callback is what waits,
+     for every keep-alive and WebSocket socket to go idle on its own. So the
+     connections are destroyed right after, before anything is awaited: that is
+     what turns "eventually" into "now" for both this callback and io.close(),
+     which closes the same HTTP server underneath. */
+  const httpClosed = new Promise<void>((resolve) => server.close(() => resolve()));
+  server.closeAllConnections();
+  await withTimeout('Socket.IO close', STEP_TIMEOUT_MS, closeSocketServer());
+  await withTimeout('HTTP server close', STEP_TIMEOUT_MS, httpClosed);
+  logger.info(`Port ${env.PORT} released.`);
 
   // Stopped before the database closes so the in-flight message can finish its
   // write. Anything still `processing` is reclaimed by recoverStaleClaims() on
   // the next boot, so a hard kill here costs a retry, never a message.
   if (queueWorker) {
-    try {
-      await queueWorker.stop();
-    } catch (err) {
-      logger.warn('Error stopping the queue worker', err);
-    }
+    await withTimeout('queue worker stop', STEP_TIMEOUT_MS, queueWorker.stop());
   }
 
   if (telegramListener) {
-    try {
-      await telegramListener.stop();
-      logger.info('Telegram listener stopped.');
-    } catch (err) {
-      logger.warn('Error stopping Telegram listener', err);
-    }
+    await withTimeout('Telegram listener stop', STEP_TIMEOUT_MS, telegramListener.stop());
   }
 
-  await closeSocketServer();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  await disconnectDatabase();
+  await withTimeout('MongoDB disconnect', STEP_TIMEOUT_MS, disconnectDatabase());
   logger.info('Shutdown complete.');
+}
+
+/**
+ * Binds the server, retrying a busy port for a short while.
+ *
+ * The predecessor process can still be draining its own teardown when the
+ * replacement boots — a restart is a handover, not a fresh start. Retrying beats
+ * dying: an unhandled `error` event here killed the process with a stack trace,
+ * and under a watcher that turned one slow shutdown into a dev server that
+ * stayed down until it was restarted by hand.
+ */
+async function listen(server: HttpServer, attempts = 10, delayMs = 400): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        /* Both handlers are `once` and both are removed on settle. A failed
+           attempt used to leave its success callback behind — `listen(port, cb)`
+           registers cb as a 'listening' listener, and nothing unregisters it when
+           the bind fails — so ten retries meant ten dead listeners and a
+           MaxListenersExceededWarning on top of the real problem. */
+        const onListening = (): void => {
+          server.removeListener('error', onError);
+          resolve();
+        };
+        const onError = (error: NodeJS.ErrnoException): void => {
+          server.removeListener('listening', onListening);
+          reject(error);
+        };
+
+        server.once('listening', onListening);
+        server.once('error', onError);
+        server.listen(env.PORT);
+      });
+      return;
+    } catch (error: unknown) {
+      const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE';
+      if (!busy || attempt >= attempts) {
+        if (busy) {
+          logger.error(
+            `Port ${env.PORT} is still in use after ${attempts} attempts. Something else is ` +
+              'holding it — stop that process, or set PORT to a free port.',
+          );
+        }
+        throw error;
+      }
+
+      logger.warn(
+        `Port ${env.PORT} is busy (attempt ${attempt}/${attempts}) — retrying in ${delayMs}ms.`,
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -87,17 +176,34 @@ async function main(): Promise<void> {
   // Initialize Socket.IO attached to the HTTP server
   initSocketServer(server);
 
-  server.listen(env.PORT, () => {
-    logger.info(`API listening on http://localhost:${env.PORT}`);
-    logger.info(`Health:  http://localhost:${env.PORT}/health`);
-    logger.info(`API root: http://localhost:${env.PORT}/api/v1`);
-  });
+  await listen(server);
+  logger.info(`API listening on http://localhost:${env.PORT}`);
+  logger.info(`Health:  http://localhost:${env.PORT}/health`);
+  logger.info(`API root: http://localhost:${env.PORT}/api/v1`);
 
   // Registered before the Telegram startup below: resolving channels and running
   // the 7-day backfill can take a while, and Ctrl+C during it must still shut the
   // HTTP server, Socket.IO and MongoDB down cleanly.
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
+      /* A watcher that thinks the process is stuck sends the signal again, and an
+         impatient Ctrl+C does the same. Re-entering shutdown() would close an
+         already-closed server; the second signal means "stop waiting" instead. */
+      if (shuttingDown) {
+        logger.warn(`Received ${signal} again — exiting now.`);
+        process.exit(0);
+      }
+      shuttingDown = true;
+
+      /* Backstop for anything that ignores its own timeout — an open Telegram
+         socket, a Mongoose operation mid-flight. Unref'd, so it never delays an
+         exit that happens on its own. */
+      const kill = setTimeout(() => {
+        logger.warn(`Shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms — exiting anyway.`);
+        process.exit(0);
+      }, SHUTDOWN_TIMEOUT_MS);
+      kill.unref?.();
+
       shutdown(server, signal).then(
         () => process.exit(0),
         (error: unknown) => {
