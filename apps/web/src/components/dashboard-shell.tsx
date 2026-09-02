@@ -27,7 +27,7 @@ const NAV_ITEMS = [
 /**
  * Sidebar-and-content shell shared by every dashboard screen.
  *
- * The sidebar is a card that becomes a horizontal scroller below `lg`, so a
+ * The sidebar is a card that becomes a wrapping row of chips below `lg`, so a
  * phone gets the same set of destinations without a drawer to open. Each page
  * supplies its own heading — the shell is only the frame.
  */
@@ -39,13 +39,23 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const isActive = (href: string) => pathname === href;
 
   return (
-    <div className="mx-auto grid w-full max-w-6xl gap-4 px-3 py-6 sm:gap-6 sm:px-6 sm:py-8 lg:grid-cols-[15.5rem_1fr] lg:gap-8 lg:px-8 lg:py-10">
-      <aside className="lg:sticky lg:top-24 lg:self-start">
+    /* `grid-cols-1` rather than the implicit single track: an implicit `auto`
+       track is floored at its items' min-content width, and the nav below is a
+       row of `whitespace-nowrap` chips, so on a phone that floor was wider than
+       the viewport and the whole column — headings and cards included — was
+       clipped by the body's `overflow-x-hidden`. Tailwind's `grid-cols-1` is
+       `minmax(0, 1fr)`, which caps the track at the available width. `min-w-0`
+       on the sidebar keeps the same nav from pushing the track out again. */
+    <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-4 px-3 py-6 sm:gap-6 sm:px-6 sm:py-8 lg:grid-cols-[15.5rem_1fr] lg:gap-8 lg:px-8 lg:py-10">
+      <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start">
         <nav
           aria-label="Dashboard"
           className="rounded-lg border border-border bg-surface p-1.5 shadow-e1 sm:p-2.5"
         >
-          <ul className="flex gap-1 overflow-x-auto scrollbar-hide lg:flex-col lg:overflow-visible">
+          {/* Wraps below `lg` instead of scrolling sideways: six destinations do
+              not fit one phone row, and a hidden-scrollbar strip would leave
+              Profile Settings and Logout off-screen with nothing to say so. */}
+          <ul className="flex flex-wrap gap-1 lg:flex-col lg:flex-nowrap">
             {NAV_ITEMS.map((item) => {
               const active = isActive(item.href);
               const Icon = item.icon;
