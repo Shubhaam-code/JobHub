@@ -77,6 +77,18 @@ export const envSchema = z.object({
   TELEGRAM_SESSION: optionalValue,
 
   /**
+   * Cap on peers held in the session's entity store.
+   *
+   * GramJS's own `MemorySession` keeps these in a `Set` it can never dedup, so
+   * the store grows by one row per message forever — the leak that exhausted
+   * memory in production. `BoundedStringSession` replaces it with a keyed map
+   * capped here. The default is far above this deployment's working set (one
+   * row per configured channel plus occasional senders); raise it only if a
+   * much larger channel list is configured.
+   */
+  TELEGRAM_ENTITY_CACHE_MAX: z.coerce.number().int().min(50).max(100_000).default(2_000),
+
+  /**
    * Comma-separated list of public Telegram channel usernames to listen to.
    * Example: "jobs_and_internships_updates,another_jobs_channel"
    * Defaults to the legacy single channel if not provided.
@@ -108,6 +120,22 @@ export const envSchema = z.object({
   LLM_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(1),
 
   // ── Ingest queue worker ─────────────────────────────────────────────────
+  /**
+   * How many queue messages may be processed at once.
+   *
+   * This is the app's memory backpressure knob: the queue lives in MongoDB, and
+   * only the messages currently being processed are ever held in this process.
+   * At most `QUEUE_CONCURRENCY` claimed rows (raw post text plus one LLM
+   * request/response) exist in memory at any moment, regardless of how deep the
+   * queue is.
+   *
+   * Default 1 — chosen to match the workload, not picked arbitrarily. The
+   * classifier is throttled to `LLM_MAX_REQUESTS_PER_MINUTE` (10) with
+   * `LLM_CONCURRENCY` (1), so a second worker slot would spend its life waiting
+   * on the rate limiter while holding a claimed message in memory. Raise it only
+   * alongside `LLM_CONCURRENCY`, and keep both small on a 512 MB instance.
+   */
+  QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
   /** How often the worker looks for claimable messages, in ms. */
   QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().min(200).max(600_000).default(2_000),
   /** Attempts before a message is parked in `failed` (dead-letter). */
@@ -160,6 +188,33 @@ export const envSchema = z.object({
    * live in `src/recommendations/matching.ts`.
    */
   RECOMMENDATION_MIN_SCORE: z.coerce.number().int().min(0).max(100).default(50),
+
+  // ── Resource limits & observability ─────────────────────────────────────
+  /**
+   * Cap on pooled MongoDB connections.
+   *
+   * The driver defaults to 100, and each idle socket carries its own buffers —
+   * a large reserve of memory this workload never needs. One HTTP process plus
+   * a serial queue worker is served comfortably by a handful of connections.
+   */
+  MONGODB_MAX_POOL_SIZE: z.coerce.number().int().min(1).max(500).default(10),
+  /**
+   * How often the memory reporter logs a process snapshot (RSS, heap, queue
+   * depth, active jobs), in ms. Set to 0 to disable it.
+   *
+   * One short line per interval, with no message text, prompts or user data in
+   * it — this is what makes a slow climb visible in Render's log stream before
+   * it becomes an OOM kill.
+   */
+  MEMORY_REPORT_INTERVAL_MS: z.coerce.number().int().min(0).max(3_600_000).default(60_000),
+  /**
+   * Concurrent resume parses allowed. Each one holds an uploaded PDF (up to
+   * `RESUME_MAX_BYTES`) plus its extracted text while it runs, so this bounds
+   * the upload path's memory the same way `QUEUE_CONCURRENCY` bounds the
+   * worker's. Requests past the limit wait their turn rather than being
+   * rejected, so behaviour is unchanged.
+   */
+  RESUME_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
 });
 
 export type RawEnv = z.infer<typeof envSchema>;

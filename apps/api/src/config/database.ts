@@ -49,7 +49,19 @@ export async function connectDatabase(): Promise<boolean> {
   registerConnectionListeners();
 
   try {
-    await mongoose.connect(env.MONGODB_URI, { serverSelectionTimeoutMS: 5_000 });
+    await mongoose.connect(env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5_000,
+      /* The driver's default pool is 100 connections. Each one it actually
+         opens costs sockets and per-connection buffers, and this process — one
+         HTTP server plus a serial queue worker — never has more than a few
+         operations in flight. Capping the pool bounds that memory instead of
+         leaving the ceiling at whatever a traffic spike happens to open. */
+      maxPoolSize: env.MONGODB_MAX_POOL_SIZE,
+      // Lets the pool shed sockets during quiet periods rather than holding
+      // every connection a burst created for the lifetime of the process.
+      minPoolSize: 0,
+      maxIdleTimeMS: 60_000,
+    });
     return true;
   } catch (error) {
     logger.error(

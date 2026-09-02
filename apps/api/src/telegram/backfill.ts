@@ -8,6 +8,11 @@
  * stops at the first message older than the cutoff, so the whole channel is
  * never fetched. The collected messages are then ingested oldest → newest.
  *
+ * Only the id, date and text of each message are kept while walking — never the
+ * GramJS message object, which carries the peer, media and entity graph behind
+ * it. With 17 channels backfilled in sequence at startup, holding the raw
+ * objects instead would multiply the startup peak by the size of that graph.
+ *
  * Safe to run repeatedly: deduplication stays the ingestion pipeline's job via
  * the queue's unique message key.
  */
@@ -193,9 +198,15 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillSum
   }
 
   // ── Ingest oldest → newest ────────────────────────────────────────────────
-  eligible.reverse();
+  /* Walked newest-first, so the buffer is drained from the back to ingest in
+     chronological order. `pop()` (rather than `reverse()` then `for…of`) also
+     releases each message as it is consumed, so the post text already ingested
+     is collectable while the rest of the window is still being queued, instead
+     of the whole window staying reachable until the loop ends. */
+  while (eligible.length > 0) {
+    const message = eligible.pop();
+    if (message === undefined) break;
 
-  for (const message of eligible) {
     try {
       const result = await ingest({
         text: message.text,

@@ -177,11 +177,23 @@ export async function startListener(handle: TelegramClientHandle): Promise<Liste
       logger.info('[listener] Stopping...');
       client.removeEventHandler(onNewMessage, new NewMessage({}));
 
+      // The per-channel lookups built above are the listener's only retained
+      // state; released here so a stopped listener holds nothing. (`backfill`
+      // is left alone — it is part of the returned handle, and it holds counts,
+      // not messages.)
+      channelIdSet.clear();
+      channelByIdStr.clear();
+
       try {
         await client.disconnect();
       } catch {
         // Ignore disconnect errors during teardown.
       }
+
+      // Drops the session's cached peer rows. They are pure lookup data, rebuilt
+      // from Telegram on the next start, so this costs nothing and guarantees
+      // the store cannot outlive the client that filled it.
+      handle.session.clearEntities();
 
       logger.info('[listener] Stopped.');
     },

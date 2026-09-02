@@ -5,6 +5,12 @@ import { connectDatabase, disconnectDatabase, redactUri } from './config/databas
 import { env } from './config/env.js';
 import { seedAdminUser } from './lib/auth.js';
 import { logger } from './lib/logger.js';
+import {
+  memorySnapshot,
+  startMemoryReporter,
+  stopMemoryReporter,
+  trackEntityStore,
+} from './lib/memory-reporter.js';
 import { closeSocketServer, initSocketServer } from './lib/socket.js';
 import { recoverStaleClaims } from './queue/ingest-queue.js';
 import { startQueueWorker, type QueueWorker } from './queue/worker.js';
@@ -51,6 +57,10 @@ async function withTimeout(label: string, ms: number, task: Promise<unknown>): P
 async function shutdown(server: HttpServer, signal: string): Promise<void> {
   logger.info(`Received ${signal} — shutting down.`);
 
+  // Diagnostics go first: nothing below benefits from another memory line, and
+  // the reporter must not query a database that is about to close.
+  stopMemoryReporter();
+
   /* The port goes first, before anything that can block. `tsx watch` (and Render)
      start the replacement process as soon as the signal is sent, so every extra
      millisecond spent holding :PORT is a millisecond the new process can lose to
@@ -79,6 +89,16 @@ async function shutdown(server: HttpServer, signal: string): Promise<void> {
   }
 
   await withTimeout('MongoDB disconnect', STEP_TIMEOUT_MS, disconnectDatabase());
+
+  // One last line, so a shutdown that followed a memory alarm still records
+  // where the process ended up. Numbers only, same as every other memory line.
+  const final = memorySnapshot();
+  logger.info(
+    `[memory] final rss=${final.rssMb}MB heapUsed=${final.heapUsedMb}MB ` +
+      `started=${final.totals.started} completed=${final.totals.completed} ` +
+      `skipped=${final.totals.skipped} retried=${final.totals.retried} failed=${final.totals.failed}`,
+  );
+
   logger.info('Shutdown complete.');
 }
 
@@ -181,6 +201,12 @@ async function main(): Promise<void> {
   logger.info(`Health:  http://localhost:${env.PORT}/health`);
   logger.info(`API root: http://localhost:${env.PORT}/api/v1`);
 
+  /* Started once the server is up, so the first snapshot describes a process
+     that is actually serving. This is the diagnostic that makes a slow climb
+     visible in Render's logs before it becomes an OOM kill — see
+     lib/memory-reporter.ts for what it does and does not record. */
+  startMemoryReporter(env.MEMORY_REPORT_INTERVAL_MS);
+
   // Registered before the Telegram startup below: resolving channels and running
   // the 7-day backfill can take a while, and Ctrl+C during it must still shut the
   // HTTP server, Socket.IO and MongoDB down cleanly.
@@ -249,8 +275,16 @@ async function main(): Promise<void> {
 
       if (await handle.client.isUserAuthorized()) {
         telegramListener = await startListener(handle);
+        /* Publishes the size of the session's bounded entity store to the memory
+           reporter. This is the number that used to climb forever — one row per
+           message — so it is worth watching directly rather than inferring it
+           from RSS. A count, never a row. */
+        trackEntityStore(() => handle.session.entityCount);
         logger.info('[startup] Realtime Telegram listener attached.');
       } else {
+        // Nothing is listening, so the client must not stay connected holding a
+        // socket and its buffers for the life of the process.
+        await handle.client.disconnect().catch(() => undefined);
         logger.warn(
           '[startup] Telegram session not authorized. Run `npm run telegram:login` to authorize.',
         );

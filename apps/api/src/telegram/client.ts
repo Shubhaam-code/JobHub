@@ -1,9 +1,7 @@
 import { TelegramClient } from 'telegram';
-// `telegram` is CommonJS with no `exports` map, so ESM needs the explicit file
-// path here — the bare directory specifier `telegram/sessions` fails to resolve.
-import { StringSession } from 'telegram/sessions/index.js';
 
 import { env } from '../config/env.js';
+import { BoundedStringSession } from './bounded-session.js';
 
 /** Shown in Telegram > Settings > Devices, so this login is easy to spot and revoke. */
 const DEVICE_MODEL = 'job-internship-aggregator';
@@ -29,6 +27,11 @@ export interface TelegramClientHandle {
    * must only ever reach the operator's terminal or `apps/api/.env`.
    */
   saveSession(): string;
+  /**
+   * The session's bounded entity store. Exposed so teardown can release it and
+   * the memory reporter can read its size — never its contents.
+   */
+  session: BoundedStringSession;
 }
 
 /**
@@ -59,12 +62,16 @@ export function readTelegramCredentials(): TelegramCredentials {
  *
  * Pass an empty string to start a fresh login; omit the argument to resume the
  * session from `TELEGRAM_SESSION`. Callers own connecting and disconnecting.
+ *
+ * The session is a `BoundedStringSession` rather than GramJS's `StringSession`:
+ * same serialization format and the same `TELEGRAM_SESSION` string, but its
+ * entity store cannot grow without bound. See `bounded-session.ts`.
  */
 export function createTelegramClient(
   sessionString: string = env.TELEGRAM_SESSION ?? '',
 ): TelegramClientHandle {
   const { apiId, apiHash } = readTelegramCredentials();
-  const session = new StringSession(sessionString);
+  const session = new BoundedStringSession(sessionString, env.TELEGRAM_ENTITY_CACHE_MAX);
 
   const client = new TelegramClient(session, apiId, apiHash, {
     connectionRetries: 5,
@@ -74,6 +81,7 @@ export function createTelegramClient(
 
   return {
     client,
+    session,
     saveSession: () => session.save(),
   };
 }

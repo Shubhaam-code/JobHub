@@ -3,10 +3,17 @@
  *
  * queue → claim → LLM classify → store job → broadcast → mark completed
  *
- * It is a loop, not a listener: it claims one message at a time, and a rate limit
- * or provider outage only ever delays work. Nothing is dropped, because the
- * message stays in the queue until it is either classified or has exhausted its
- * attempts (at which point it is parked as `failed`, still holding its raw text).
+ * It is a loop, not a listener: it claims a bounded number of messages at a
+ * time, and a rate limit or provider outage only ever delays work. Nothing is
+ * dropped, because the message stays in the queue until it is either classified
+ * or has exhausted its attempts (at which point it is parked as `failed`, still
+ * holding its raw text).
+ *
+ * Memory backpressure lives here. The queue itself is in MongoDB, so a backlog
+ * of ten thousand messages costs this process nothing; at most
+ * `QUEUE_CONCURRENCY` claimed messages — and their in-flight LLM
+ * request/response — are ever resident. The queue is never read into an array,
+ * and there is no `Promise.all` over claimable work.
  *
  * Classification uses `maxAttempts: 1` so a 429 comes straight back instead of
  * sleeping inside the call — the durable queue schedules the retry.
@@ -14,6 +21,7 @@
 
 import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
+import { jobFinished, jobStarted } from '../lib/memory-reporter.js';
 import { broadcastNewJob } from '../lib/socket.js';
 import { JobModel } from '../models/job.model.js';
 import { type IngestQueueDocument } from '../models/ingest-queue.model.js';
@@ -147,29 +155,60 @@ async function processEntry(entry: IngestQueueDocument): Promise<ProcessResult> 
   }
 }
 
+/** Maps an outcome onto the counter the memory reporter tracks. */
+function outcomeCounter(outcome: ProcessOutcome): 'completed' | 'skipped' | 'failed' | 'retried' {
+  if (outcome === 'completed') return 'completed';
+  if (outcome === 'skipped') return 'skipped';
+  if (outcome === 'failed') return 'failed';
+  return 'retried';
+}
+
 /**
  * Claims and processes at most one message.
  *
  * Exported so a script or a test can step the queue by hand without running the
  * loop. Returns `idle` when there is nothing claimable.
+ *
+ * The claimed document is referenced only inside this call. Once it returns, the
+ * raw post text, the cleaned text and the LLM response are all unreachable and
+ * collectable — nothing about a processed message is retained between cycles.
  */
 export async function processNextMessage(): Promise<ProcessResult> {
   const entry = await claimNextMessage();
   if (entry === null) return { outcome: 'idle' };
 
+  jobStarted();
+  let result: ProcessResult | undefined;
+
   try {
-    return await processEntry(entry);
+    result = await processEntry(entry);
   } catch (error: unknown) {
     // Last-resort guard: an unexpected throw must not leave the row `processing`.
     const reason = errorText(error);
     logger.error(`[queue] unexpected worker error queueJobId=${entry._id.toString()} → ${reason}`);
-    const decision = await scheduleRetry(entry, reason);
-    return {
-      outcome: decision.status === 'failed' ? 'failed' : 'retry_scheduled',
-      queueJobId: entry._id.toString(),
-      reason,
-    };
+
+    try {
+      const decision = await scheduleRetry(entry, reason);
+      result = {
+        outcome: decision.status === 'failed' ? 'failed' : 'retry_scheduled',
+        queueJobId: entry._id.toString(),
+        reason,
+      };
+    } catch (retryError: unknown) {
+      /* Even the retry write failed — the database is unreachable. The row stays
+         `processing` and `recoverStaleClaims()` releases it after
+         QUEUE_STALE_CLAIM_MS, so the message is delayed, never lost. Reported as
+         a retry so the loop backs off instead of spinning on a dead database. */
+      logger.error(`[queue] could not schedule retry → ${errorText(retryError)}`);
+      result = { outcome: 'retry_scheduled', queueJobId: entry._id.toString(), reason };
+    }
+  } finally {
+    // In a `finally` so the in-flight gauge always comes back down, even on a
+    // throw that escaped every handler above.
+    jobFinished(outcomeCounter(result?.outcome ?? 'failed'));
   }
+
+  return result;
 }
 
 export interface QueueWorker {
@@ -178,34 +217,60 @@ export interface QueueWorker {
 }
 
 /**
+ * The worker running in this process, if any.
+ *
+ * A second `startQueueWorker()` returns this one instead of starting another set
+ * of runners. Duplicate workers are the classic way a "memory leak" appears
+ * after a restart or a hot reload: the old loops keep claiming and processing
+ * while the new ones do the same, doubling both memory and provider usage with
+ * nothing in the logs to say so. `stop()` clears it, so a stopped worker can be
+ * started again.
+ */
+let activeWorker: QueueWorker | null = null;
+
+/**
  * Starts the worker loop.
  *
- * Drains the queue until it is empty, then waits `QUEUE_POLL_INTERVAL_MS` before
- * looking again — one timer, no busy-wait. `LLM_CONCURRENCY` is enforced inside
- * the rate limiter, so this loop stays a simple single-claim cycle.
+ * Runs `QUEUE_CONCURRENCY` independent runners. Each one claims at most one
+ * message at a time, so the number of messages resident in this process is
+ * capped by that setting and by nothing else — a queue of any depth is drained
+ * with the same memory footprint. Claiming is a single atomic `findOneAndUpdate`,
+ * so runners can never claim the same row.
+ *
+ * A runner that finds nothing (or that just parked its message for retry) waits
+ * `QUEUE_POLL_INTERVAL_MS` before looking again — one timer per idle runner, no
+ * busy-wait. `LLM_CONCURRENCY` is enforced separately inside the rate limiter,
+ * which is what keeps provider usage bounded independently of this setting.
  */
 export function startQueueWorker(): QueueWorker {
+  if (activeWorker !== null) {
+    logger.warn('[queue] worker already running in this process — reusing it.');
+    return activeWorker;
+  }
+
   let running = true;
-  let wake: (() => void) | null = null;
-  let timer: NodeJS.Timeout | null = null;
+  /** One wake handle per sleeping runner, so `stop()` can release all of them. */
+  const sleepers = new Map<number, { wake: () => void; timer: NodeJS.Timeout }>();
 
   /** Sleeps, but returns early when `stop()` is called. */
-  function sleep(ms: number): Promise<void> {
+  function sleep(runnerId: number, ms: number): Promise<void> {
     return new Promise((resolve) => {
-      wake = resolve;
-      timer = setTimeout(() => {
-        wake = null;
+      const timer = setTimeout(() => {
+        sleepers.delete(runnerId);
         resolve();
       }, ms);
       timer.unref?.();
+      sleepers.set(runnerId, {
+        wake: () => {
+          sleepers.delete(runnerId);
+          resolve();
+        },
+        timer,
+      });
     });
   }
 
-  async function loop(): Promise<void> {
-    logger.info(
-      `[queue] worker started pollInterval=${env.QUEUE_POLL_INTERVAL_MS}ms maxAttempts=${env.QUEUE_MAX_ATTEMPTS} rpm=${env.LLM_MAX_REQUESTS_PER_MINUTE} concurrency=${env.LLM_CONCURRENCY}`,
-    );
-
+  async function runner(runnerId: number): Promise<void> {
     while (running) {
       let result: ProcessResult;
 
@@ -222,26 +287,49 @@ export function startQueueWorker(): QueueWorker {
       // Nothing claimable, or the message just processed went back to retry_wait.
       // Other pending messages are picked up on the next cycle.
       if (result.outcome === 'idle' || result.outcome === 'retry_scheduled') {
-        await sleep(env.QUEUE_POLL_INTERVAL_MS);
+        await sleep(runnerId, env.QUEUE_POLL_INTERVAL_MS);
       }
     }
+  }
+
+  async function loop(): Promise<void> {
+    const concurrency = env.QUEUE_CONCURRENCY;
+
+    logger.info(
+      `[queue] worker started concurrency=${concurrency} pollInterval=${env.QUEUE_POLL_INTERVAL_MS}ms maxAttempts=${env.QUEUE_MAX_ATTEMPTS} rpm=${env.LLM_MAX_REQUESTS_PER_MINUTE} llmConcurrency=${env.LLM_CONCURRENCY}`,
+    );
+
+    /* `allSettled`, not `all`: this awaits a fixed, small set of long-lived
+       runners (not per-message work), and one runner rejecting must not leave
+       the others unawaited and un-stoppable during shutdown. */
+    await Promise.allSettled(
+      Array.from({ length: concurrency }, (_unused, index) => runner(index)),
+    );
 
     logger.info('[queue] worker stopped');
   }
 
   const idle = loop();
 
-  return {
+  const worker: QueueWorker = {
     async stop(): Promise<void> {
       running = false;
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
+
+      // Release every pending sleep so each runner can observe `running === false`.
+      for (const sleeper of [...sleepers.values()]) {
+        clearTimeout(sleeper.timer);
+        sleeper.wake();
       }
-      // Release a pending sleep so the loop can observe `running === false`.
-      wake?.();
-      wake = null;
+      sleepers.clear();
+
       await idle;
+
+      // Cleared last, so a restart after a clean stop is allowed while a second
+      // concurrent start is still refused.
+      if (activeWorker === worker) activeWorker = null;
     },
   };
+
+  activeWorker = worker;
+  return worker;
 }

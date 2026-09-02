@@ -208,7 +208,15 @@ export async function extractPdfText(data: Buffer): Promise<PdfTextResult> {
     };
   }
 
-  const parser = new Parser({ data: new Uint8Array(data) });
+  /* A Buffer is already a Uint8Array view over its ArrayBuffer, so this hands
+     the parser a view of the same bytes instead of `new Uint8Array(data)`,
+     which allocated and copied a second multi-MB array per upload. `byteOffset`
+     and `byteLength` are required: Node pools small Buffers inside a larger
+     shared ArrayBuffer, so a view built without them can expose unrelated
+     memory. Same input to the parser, one buffer instead of two. */
+  const parser = new Parser({
+    data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+  });
 
   try {
     const result = await parser.getText();

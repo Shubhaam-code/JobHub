@@ -3,7 +3,18 @@
   "compilerOptions": {
     "noEmit": false,
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    /* Off for the production build only — `tsconfig.json` keeps them on, so
+       development and tests still get mapped stack traces.
+
+       A source map is loaded into memory and retained for the life of the
+       process the first time V8 builds a stack trace for that file, and Node
+       reads the original TypeScript alongside it. This codebase is heavily
+       commented, so the sources are several times the size of the emitted JS —
+       memory spent to make traces prettier, on the instance that is running out
+       of it. Compiled traces still give the correct file, function and line for
+       `dist/`. */
+    "sourceMap": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["tests", "**/*.test.ts", "vitest.config.ts"]

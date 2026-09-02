@@ -26,9 +26,24 @@ import {
 } from '../models/candidate-profile.model.js';
 import { normalizeSkillList } from '../recommendations/skill-dictionary.js';
 import { extractPdfText } from '../resume/pdf-text.js';
-import { parseResume } from '../resume/resume-parser.js';
+import { parseResume, type ParsedResume } from '../resume/resume-parser.js';
+import { createSemaphore } from '../lib/semaphore.js';
 
 export const profileRouter = Router();
+
+/**
+ * Bounds how many resumes are parsed at once.
+ *
+ * A single upload holds its PDF bytes (up to `RESUME_MAX_BYTES`), the pdfjs
+ * document built from them and the extracted text, all at the same time. Without
+ * a gate, N simultaneous uploads meant N of those live at once — an unbounded
+ * multiplier on a 512 MB instance, and the one path in this service where an
+ * ordinary user action could spike memory.
+ *
+ * Requests over the limit *wait* rather than being rejected, so the API contract
+ * is unchanged: the same 200/201 with the same body, just after a short queue.
+ */
+const resumeParseSlots = createSemaphore(env.RESUME_CONCURRENCY);
 
 /** Caps on hand-entered preferences, so a profile cannot be used as storage. */
 const MAX_LIST_LENGTH = 30;
@@ -201,16 +216,34 @@ profileRouter.post('/resume', readResumeUpload, async (req: Request, res: Respon
     throw badRequest('Send your resume as a PDF with Content-Type: application/pdf.');
   }
 
-  const extracted = await extractPdfText(req.body);
-  if (!extracted.ok) {
-    // A bad PDF is the user's problem to fix, so it is a 400 with the reason.
-    throw badRequest(extracted.reason);
-  }
+  /* Gate held across extraction and parsing — the two steps that hold the PDF
+     bytes, the pdfjs document and the extracted text — then released before the
+     database writes below, which are cheap and should not occupy a slot.
 
-  const parsed = await parseResume(extracted.text);
-  if (!parsed.ok) {
-    // Upstream problem, not a malformed request: 503 so the client can retry.
-    throw new HttpError(503, parsed.reason);
+     Only the parsed fields survive the block. The extracted resume text and the
+     pdfjs document go out of scope with it, so a finished upload retains nothing
+     but the handful of strings about to be stored. */
+  const releaseSlot = await resumeParseSlots.acquire();
+  let parsedProfile: ParsedResume;
+
+  try {
+    const extracted = await extractPdfText(req.body);
+    if (!extracted.ok) {
+      // A bad PDF is the user's problem to fix, so it is a 400 with the reason.
+      throw badRequest(extracted.reason);
+    }
+
+    const parsed = await parseResume(extracted.text);
+    if (!parsed.ok) {
+      // Upstream problem, not a malformed request: 503 so the client can retry.
+      throw new HttpError(503, parsed.reason);
+    }
+
+    parsedProfile = parsed.profile;
+  } finally {
+    // `finally`, so a 400/503 thrown above cannot leak the slot and shrink the
+    // effective limit by one for the rest of the process's life.
+    releaseSlot();
   }
 
   const existing = await findProfileByToken(req);
@@ -226,19 +259,19 @@ profileRouter.post('/resume', readResumeUpload, async (req: Request, res: Respon
   // the user made by hand.
   const manualFields = new Set<string>(profile.manualFields ?? []);
 
-  if (!manualFields.has('skills')) profile.skills = parsed.profile.skills;
-  if (!manualFields.has('preferredRoles')) profile.preferredRoles = parsed.profile.preferredRoles;
+  if (!manualFields.has('skills')) profile.skills = parsedProfile.skills;
+  if (!manualFields.has('preferredRoles')) profile.preferredRoles = parsedProfile.preferredRoles;
   if (!manualFields.has('preferredLocations')) {
-    profile.preferredLocations = parsed.profile.preferredLocations;
+    profile.preferredLocations = parsedProfile.preferredLocations;
   }
   if (!manualFields.has('preferredJobTypes')) {
-    profile.preferredJobTypes = parsed.profile.preferredJobTypes;
+    profile.preferredJobTypes = parsedProfile.preferredJobTypes;
   }
   if (!manualFields.has('experienceYears')) {
-    profile.experienceYears = parsed.profile.experienceYears;
+    profile.experienceYears = parsedProfile.experienceYears;
   }
   if (!manualFields.has('graduationYear')) {
-    profile.graduationYear = parsed.profile.graduationYear;
+    profile.graduationYear = parsedProfile.graduationYear;
   }
 
   profile.resumeFileName = sanitizeFileName(req.get('x-resume-filename'));
