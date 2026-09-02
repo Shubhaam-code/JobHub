@@ -187,7 +187,7 @@ function Cutouts() {
           height={1122}
           sizes="(min-width: 1024px) 22vw, 44vw"
           priority
-          className="h-auto w-full -translate-y-24 relative left-10 scale-90"
+          className="h-auto w-full relative left-10 scale-90 lg:-translate-y-24"
         />
       </div>
 
@@ -199,7 +199,7 @@ function Cutouts() {
           height={1172}
           sizes="(min-width: 1024px) 22vw, 42vw"
           priority
-          className="h-auto w-full -translate-y-20 relative left-0 scale-90"
+          className="h-auto w-full relative left-0 scale-90 lg:-translate-y-20"
         />
       </div>
     </div>

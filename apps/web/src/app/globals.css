@@ -165,6 +165,16 @@
   ::selection {
     background-color: color-mix(in oklab, var(--color-primary) 18%, white);
   }
+
+  /* Hide scrollbar for horizontal scrolling navigation */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Render the destination state instead of travelling to it. Covers every CSS

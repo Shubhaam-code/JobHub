@@ -19,7 +19,7 @@ export default function DashboardPage() {
   const hasResume = profile?.hasResume === true;
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6 sm:gap-8">
       <DashboardGreeting subtitle="Upload your resume, keep your preferences current, and see the openings that match you." />
 
       {status === "loading" ? (
@@ -33,7 +33,7 @@ export default function DashboardPage() {
         <ErrorPanel title="Unable to load your profile" message={error} onRetry={reload} />
       ) : (
         <>
-          <div className={hasResume ? "grid gap-6 xl:grid-cols-2" : undefined}>
+          <div className={hasResume ? "grid gap-4 sm:gap-6 xl:grid-cols-2" : undefined}>
             <ResumeUploadCard profile={profile} onUploaded={adopt} />
             {/* Only once there is one — otherwise this card would describe a
                 resume that has never been uploaded. */}

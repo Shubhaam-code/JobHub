@@ -39,13 +39,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const isActive = (href: string) => pathname === href;
 
   return (
-    <div className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[15.5rem_1fr] lg:gap-8 lg:px-8 lg:py-10">
+    <div className="mx-auto grid w-full max-w-6xl gap-4 px-3 py-6 sm:gap-6 sm:px-6 sm:py-8 lg:grid-cols-[15.5rem_1fr] lg:gap-8 lg:px-8 lg:py-10">
       <aside className="lg:sticky lg:top-24 lg:self-start">
         <nav
           aria-label="Dashboard"
-          className="rounded-lg border border-border bg-surface p-2.5 shadow-e1"
+          className="rounded-lg border border-border bg-surface p-1.5 shadow-e1 sm:p-2.5"
         >
-          <ul className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
+          <ul className="flex gap-1 overflow-x-auto scrollbar-hide lg:flex-col lg:overflow-visible">
             {NAV_ITEMS.map((item) => {
               const active = isActive(item.href);
               const Icon = item.icon;
@@ -55,14 +55,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   <Link
                     href={item.href}
                     aria-current={active ? "page" : undefined}
-                    className={`flex min-h-11 items-center gap-2.5 rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors duration-150 pointer-fine:min-h-10 ${
+                    className={`flex min-h-10 items-center gap-2 rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 sm:min-h-11 sm:gap-2.5 sm:px-3 sm:text-sm pointer-fine:min-h-10 ${
                       active
                         ? "bg-primary-soft font-semibold text-primary-strong"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     }`}
                   >
                     <Icon
-                      className={`size-4 shrink-0 ${active ? "text-primary" : ""}`}
+                      className={`size-3.5 shrink-0 sm:size-4 ${active ? "text-primary" : ""}`}
                       aria-hidden="true"
                     />
                     {item.label}

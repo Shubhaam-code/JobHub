@@ -60,37 +60,37 @@ export function DashboardRecommendations() {
 
   return (
     <section>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="inline-flex items-center gap-2 font-heading text-lg font-semibold tracking-heading text-foreground">
-          <Sparkles className="size-4 text-primary" aria-hidden="true" />
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+        <h2 className="inline-flex items-center gap-1.5 font-heading text-base font-semibold tracking-heading text-foreground sm:gap-2 sm:text-lg">
+          <Sparkles className="size-3.5 text-primary sm:size-4" aria-hidden="true" />
           Recommended for you
         </h2>
         {status === "ready" && (
           <Link
             href="/recommended-jobs"
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-sm text-sm font-semibold text-primary-strong underline-offset-2 hover:underline"
+            className="inline-flex min-h-8 items-center gap-1 rounded-sm text-xs font-semibold text-primary-strong underline-offset-2 hover:underline sm:min-h-9 sm:gap-1.5 sm:text-sm"
           >
             View all
-            <ArrowRight className="size-3.5" aria-hidden="true" />
+            <ArrowRight className="size-3 sm:size-3.5" aria-hidden="true" />
           </Link>
         )}
       </div>
 
       {status === "loading" ? (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-3 grid gap-3 sm:mt-4 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
           {Array.from({ length: LIMIT }).map((_, index) => (
             <div
               key={index}
-              className="h-64 animate-pulse rounded-lg border border-border bg-surface shadow-e1"
+              className="h-56 animate-pulse rounded-lg border border-border bg-surface shadow-e1 sm:h-64"
             />
           ))}
         </div>
       ) : status === "no-profile" ? (
-        <p className="mt-4 rounded-lg border border-dashed border-border-strong bg-surface px-5 py-8 text-center text-sm leading-relaxed text-subtle-foreground">
+        <p className="mt-3 rounded-lg border border-dashed border-border-strong bg-surface px-4 py-6 text-center text-xs leading-relaxed text-subtle-foreground sm:mt-4 sm:px-5 sm:py-8 sm:text-sm">
           Upload your resume above and your matches will appear here.
         </p>
       ) : status === "empty" ? (
-        <p className="mt-4 rounded-lg border border-dashed border-border-strong bg-surface px-5 py-8 text-center text-sm leading-relaxed text-subtle-foreground">
+        <p className="mt-3 rounded-lg border border-dashed border-border-strong bg-surface px-4 py-6 text-center text-xs leading-relaxed text-subtle-foreground sm:mt-4 sm:px-5 sm:py-8 sm:text-sm">
           Nothing has cleared the match threshold yet.{" "}
           <Link href="/jobs" className="font-medium text-primary-strong underline">
             Browse all jobs
@@ -100,12 +100,12 @@ export function DashboardRecommendations() {
       ) : status === "error" ? (
         <p
           role="alert"
-          className="mt-4 rounded-lg border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm leading-relaxed text-destructive"
+          className="mt-3 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5 text-xs leading-relaxed text-destructive sm:mt-4 sm:px-4 sm:py-3 sm:text-sm"
         >
           {error}
         </p>
       ) : (
-        <ul className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="mt-3 grid gap-3 sm:mt-4 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
           {recommendations.map((recommendation) => (
             <li key={recommendation.job.id} className="h-full">
               <RecommendationCard recommendation={recommendation} />
