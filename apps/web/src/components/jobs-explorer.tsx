@@ -8,6 +8,7 @@ import { JobFiltersPanel } from "@/components/job-filters-panel";
 import { JobListRow } from "@/components/job-list-row";
 import { JobSearchForm } from "@/components/job-search-form";
 import { fetchJobs, type PublicJob } from "@/lib/api";
+import { cacheJobsList, readCachedJobsList } from "@/lib/job-cache";
 import {
   DATE_POSTED_FILTERS,
   EMPTY_FILTERS,
@@ -248,21 +249,33 @@ function JobsList({
 }) {
   const filters = useMemo(() => parseFilters(new URLSearchParams(query)), [query]);
 
-  const [jobs, setJobs] = useState<PublicJob[]>([]);
-  const [status, setStatus] = useState<Status>("loading");
+  /**
+   * The list this query left on screen the last time it was open, when it is
+   * still fresh.
+   *
+   * Read once, on mount: `query` is this component's key, so it cannot change
+   * underneath it, and holding the result in state keeps every initializer below
+   * reading the same snapshot.
+   */
+  const [restored] = useState(() => readCachedJobsList(query));
+
+  const [jobs, setJobs] = useState<PublicJob[]>(restored?.jobs ?? []);
+  const [status, setStatus] = useState<Status>(restored ? "ready" : "loading");
   const [errorMsg, setErrorMsg] = useState("");
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [page, setPage] = useState(1);
-  const [liveAdded, setLiveAdded] = useState(0);
+  const [total, setTotal] = useState(restored?.total ?? 0);
+  const [totalPages, setTotalPages] = useState(restored?.totalPages ?? 1);
+  const [page, setPage] = useState(restored?.page ?? 1);
+  const [liveAdded, setLiveAdded] = useState(restored?.liveAdded ?? 0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState("");
   const [retryKey, setRetryKey] = useState(0);
+  /** When the API last answered for this query — see `CachedJobsList.loadedAt`. */
+  const [loadedAt, setLoadedAt] = useState(restored?.loadedAt ?? 0);
 
   /* Ids already on screen. Kept in a ref rather than derived from `jobs` so both
      the socket handler and the next batch can decide *before* updating state
      whether a job is new — which is what keeps the count honest. */
-  const seenIds = useRef<Set<string>>(new Set());
+  const seenIds = useRef<Set<string>>(new Set<string>(restored?.jobs.map((job) => job.id)));
 
   /** The element observed below the list; state, not a ref, so the observer
       effect re-runs when it mounts or unmounts. */
@@ -272,6 +285,11 @@ function JobsList({
   const loadingMoreRef = useRef(false);
 
   useEffect(() => {
+    /* Restored from the session cache: the rows on screen already are this
+       query's result, so there is nothing to ask for. "Try again" bumps
+       `retryKey`, which is how a retry still reaches the API. */
+    if (restored && retryKey === 0) return;
+
     const controller = new AbortController();
     let live = true;
 
@@ -282,6 +300,7 @@ function JobsList({
         setJobs(response.data);
         setTotal(response.pagination.total);
         setTotalPages(response.pagination.totalPages);
+        setLoadedAt(Date.now());
         setStatus("ready");
       })
       .catch((error: unknown) => {
@@ -294,7 +313,16 @@ function JobsList({
       live = false;
       controller.abort();
     };
-  }, [filters, retryKey]);
+  }, [filters, restored, retryKey]);
+
+  /* Keep the session cache in step with what is on screen — including batches
+     appended by infinite scroll and arrivals over the socket — so leaving the
+     page and coming back restores this list rather than reloading its first
+     page. */
+  useEffect(() => {
+    if (status !== "ready") return;
+    cacheJobsList(query, { jobs, page, total, totalPages, liveAdded, loadedAt });
+  }, [query, status, jobs, page, total, totalPages, liveAdded, loadedAt]);
 
   const handleRetry = () => {
     setStatus("loading");

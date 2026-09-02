@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 
+import { InlineLoading } from "@/components/panels";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { fetchRecommendations, type Recommendation } from "@/lib/profile";
 
@@ -166,10 +167,13 @@ export default function RecommendedJobsPage() {
       <section className="mx-auto w-full max-w-6xl px-4 pt-10 pb-16 sm:px-6 sm:pb-20 lg:px-8 lg:pb-24">
         {status === "loading" ? (
           <>
-            <span className="sr-only" role="status">
-              Loading your recommendations
-            </span>
-            <div className="grid gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
+            {/* The wait is announced on the same rule the match count lands on,
+                so when the results arrive the count takes this line's place
+                instead of the grid shifting down under the reader. */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+              <InlineLoading label="Looking for your recommended jobs…" />
+            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
               {Array.from({ length: 6 }).map((_, index) => (
                 <div
                   key={index}

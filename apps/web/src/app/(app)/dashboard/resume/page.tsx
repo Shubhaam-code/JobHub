@@ -2,7 +2,7 @@
 
 import { Lightbulb } from "lucide-react";
 
-import { CardSkeleton, ErrorPanel } from "@/components/panels";
+import { CardSkeleton, ErrorPanel, InlineLoading } from "@/components/panels";
 import { ResumeSummaryCard, ResumeUploadCard } from "@/components/resume-upload-card";
 import { useCandidateProfile } from "@/lib/use-candidate-profile";
 
@@ -40,12 +40,10 @@ export default function DashboardResumePage() {
       </header>
 
       {status === "loading" ? (
-        <>
-          <span className="sr-only" role="status">
-            Loading your profile
-          </span>
+        <div className="flex flex-col gap-3">
+          <InlineLoading label="Loading your profile…" />
           <CardSkeleton className="h-80" />
-        </>
+        </div>
       ) : status === "error" ? (
         <ErrorPanel title="Unable to load your profile" message={error} onRetry={reload} />
       ) : (

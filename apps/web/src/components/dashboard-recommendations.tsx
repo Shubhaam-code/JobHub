@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Sparkles } from "lucide-react";
 
+import { InlineLoading } from "@/components/panels";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { errorText, fetchRecommendations, type Recommendation } from "@/lib/profile";
 
@@ -65,6 +66,10 @@ export function DashboardRecommendations() {
           <Sparkles className="size-3.5 text-primary sm:size-4" aria-hidden="true" />
           Recommended for you
         </h2>
+        {/* Shares the heading row with "View all" — the two never coexist, so the
+            wait costs no extra height and the row does not reflow when the
+            matches land. */}
+        {status === "loading" && <InlineLoading label="Looking for your recommended jobs…" />}
         {status === "ready" && (
           <Link
             href="/recommended-jobs"

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
 
 /**
  * The panel shown when a request the screen depends on failed.
@@ -47,5 +47,35 @@ export function CardSkeleton({ className = "h-64" }: { className?: string }) {
     <div
       className={`animate-pulse rounded-lg border border-border bg-surface shadow-e1 ${className}`}
     />
+  );
+}
+
+/**
+ * One line of "this is working on it", shown next to the skeletons rather than
+ * over them.
+ *
+ * The skeletons alone say the shape of what is coming but not that anything is
+ * happening, which on a slow fetch reads as a stalled page. A named wait —
+ * "Looking for your recommended jobs…" — is the part a reader can act on, so it
+ * says what is being waited for rather than a bare "Loading".
+ *
+ * `role="status"` and no `aria-live` of its own: the role carries `polite`
+ * already, and this replaces the screens' previous `sr-only` status lines, so the
+ * announcement is unchanged and now visible too. Deliberately not a spinner over
+ * a dimmed page or a modal — it costs no layout and disappears the moment the
+ * caller's state leaves "loading".
+ */
+export function InlineLoading({ label, className = "" }: { label: string; className?: string }) {
+  return (
+    <p
+      role="status"
+      className={`inline-flex items-center gap-2 text-xs font-medium text-muted-foreground sm:text-sm ${className}`}
+    >
+      <Loader2
+        className="size-3.5 shrink-0 animate-spin text-primary sm:size-4"
+        aria-hidden="true"
+      />
+      {label}
+    </p>
   );
 }

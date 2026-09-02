@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { fetchJob, type PublicJob } from "@/lib/api";
+import { cacheJob, readCachedJob } from "@/lib/job-cache";
 import { LinkifiedText } from "@/components/linkified-text";
 import { resolveLink } from "@/lib/links";
 import {
@@ -57,9 +58,17 @@ export default function JobDetailPage() {
   const params = useParams();
   const id = typeof params["id"] === "string" ? params["id"] : "";
 
-  const [job, setJob] = useState<PublicJob | null>(null);
+  /**
+   * This job as loaded earlier in this session, when it is still fresh.
+   *
+   * Only seeds the state below — the effect reads the cache itself, so that a
+   * store write never feeds back into this render as a changed dependency.
+   */
+  const cached = id ? readCachedJob(id) : null;
+
+  const [job, setJob] = useState<PublicJob | null>(cached);
   const [status, setStatus] = useState<"loading" | "found" | "notfound" | "error">(
-    id ? "loading" : "notfound",
+    cached ? "found" : id ? "loading" : "notfound",
   );
   const [errorMsg, setErrorMsg] = useState("");
   /** Bumped by "Try again" — the effect keys off it so a retry actually refetches. */
@@ -71,11 +80,23 @@ export default function JobDetailPage() {
     if (!id) return;
 
     abortRef.current?.abort();
+
+    /* Already loaded and still fresh: show that copy instead of emptying the page
+       for a request whose answer is here. Skipped once "Try again" has been
+       pressed, so an explicit retry always goes back to the API. */
+    const loaded = retryKey === 0 ? readCachedJob(id) : null;
+    if (loaded) {
+      setJob(loaded);
+      setStatus("found");
+      return;
+    }
+
     const controller = new AbortController();
     abortRef.current = controller;
 
     fetchJob(id, controller.signal)
       .then((data) => {
+        cacheJob(data);
         setJob(data);
         setStatus("found");
       })
