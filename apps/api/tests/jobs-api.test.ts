@@ -95,6 +95,28 @@ const legacyJob = {
   updatedAt: new Date('2026-08-31T09:00:05.000Z'),
 };
 
+/**
+ * A row written before the apply-link rules existed, whose "apply" link is an
+ * aggregator's article about the job. The backfill has to visit a document to fix
+ * it, so until it does, the read path is what keeps the article off the card.
+ */
+const aggregatorJob = {
+  _id: new mongoose.Types.ObjectId('64f1a2b3c4d5e6f7a8b9c004'),
+  company: 'Cognizant',
+  role: 'Programmer Analyst Trainee',
+  batch: '2026',
+  applyUrl: 'https://freshershunt.in/cognizant-off-campus-drive-2026',
+  source: 'telegram',
+  telegramChannel: 'jobs_and_internships_updates',
+  telegramMessageId: 103,
+  telegramMessageUrl: 'https://t.me/jobs_and_internships_updates/103',
+  originalText: 'Company: Cognizant\nRole: Programmer Analyst Trainee',
+  cleanedText: 'Company: Cognizant\nRole: Programmer Analyst Trainee',
+  postedAt: new Date('2026-08-31T09:30:00.000Z'),
+  createdAt: new Date('2026-08-31T09:30:05.000Z'),
+  updatedAt: new Date('2026-08-31T09:30:05.000Z'),
+};
+
 function createMockFindQuery(results: unknown[]) {
   const query = {
     sort: vi.fn().mockReturnThis(),
@@ -140,6 +162,7 @@ describe('GET /api/v1/jobs', () => {
       applyUrl: 'https://careers.google.com/jobs/123',
       location: null,
       employmentType: null,
+      companyLogoUrl: null,
       description: sampleJob2.cleanedText,
       postedAt: sampleJob2.postedAt.toISOString(),
       createdAt: sampleJob2.createdAt.toISOString(),
@@ -268,6 +291,23 @@ describe('GET /api/v1/jobs', () => {
     expect(job.applyUrl).toBeNull();
   });
 
+  it('6e. hides a legacy aggregator apply link the backfill has not reached', async () => {
+    const mockQuery = createMockFindQuery([aggregatorJob]);
+    vi.spyOn(JobModel, 'find').mockReturnValue(mockQuery as unknown as FindMock);
+    vi.spyOn(JobModel, 'countDocuments').mockResolvedValue(1);
+
+    const response = await request(app).get('/api/v1/jobs');
+
+    expect(response.status).toBe(200);
+
+    const job = response.body.data[0];
+    // No Apply button beats one that opens a competitor's article about the job.
+    expect(job.applyUrl).toBeNull();
+    // The rest of the posting is still served: only the link is withheld.
+    expect(job.company).toBe('Cognizant');
+    expect(job.role).toBe('Programmer Analyst Trainee');
+  });
+
   it('7. handles empty results gracefully', async () => {
     const mockQuery = createMockFindQuery([]);
     vi.spyOn(JobModel, 'find').mockReturnValue(mockQuery as unknown as FindMock);
@@ -362,6 +402,7 @@ describe('GET /api/v1/jobs/:id', () => {
         applyUrl: 'https://example.com/apply-1',
         location: null,
         employmentType: null,
+        companyLogoUrl: null,
         description: sampleJob1.cleanedText,
         postedAt: sampleJob1.postedAt.toISOString(),
         createdAt: sampleJob1.createdAt.toISOString(),

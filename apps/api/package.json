@@ -22,6 +22,10 @@
     "telegram:backfill": "tsx src/scripts/telegram-backfill.ts",
     "queue:status": "tsx src/scripts/queue-status.ts",
     "jobs:cleanup": "tsx src/scripts/jobs-cleanup.ts",
+    "jobs:audit-urls": "tsx src/scripts/jobs-audit-apply-urls.ts",
+    "jobs:fix-apply-urls": "tsx src/scripts/fix-apply-urls.ts",
+    "jobs:restore-urls": "tsx src/scripts/jobs-restore-damaged-apply-urls.ts",
+    "jobs:backfill-logos": "tsx src/scripts/jobs-backfill-logos.ts",
     "user:create": "tsx src/scripts/create-user.ts"
   },
   "dependencies": {

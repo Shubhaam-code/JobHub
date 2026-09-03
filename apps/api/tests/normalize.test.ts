@@ -144,4 +144,45 @@ describe('extractApplyUrl', () => {
   it('returns null for a post with no links at all', () => {
     expect(extractApplyUrl('Walk-in interview tomorrow at 10am, bring your resume')).toBeNull();
   });
+
+  /**
+   * Regression, from three stored jobs that ended up with the channel's Linktree
+   * as their apply link.
+   *
+   * The digest shape is what makes it dangerous: the post's own article comes
+   * first, a list of other articles follows, and the last line is a link-in-bio
+   * page under an "Apply" label. A link wrapper hides its destination, so it can
+   * only be rejected by host — otherwise the strongest label on the page belongs
+   * to the one link that leads nowhere near a job.
+   */
+  it('never picks the channel link-in-bio page over the post’s own article', () => {
+    const post = [
+      'Yash Technologies Hiring Executive',
+      'Apply link 👉 https://job4freshers.co.in/yash-technologies-executive/',
+      '',
+      'Subscribe: https://youtu.be/t80blkwVsv0',
+      'Apply link for all jobs 👉 https://linktr.ee/job4freshers.co_in',
+    ].join('\n');
+
+    expect(extractApplyUrl(post)).toBe('https://job4freshers.co.in/yash-technologies-executive/');
+  });
+
+  it('picks an article over the link-in-bio page even when only the wrapper is labelled', () => {
+    const post = [
+      'AGS Health Walk-In for AR Caller',
+      'https://job4freshers.co.in/ags-health-walk-in-drive/',
+      'Apply link for all jobs 👉 https://linktr.ee/job4freshers.co_in',
+    ].join('\n');
+
+    expect(extractApplyUrl(post)).toBe('https://job4freshers.co.in/ags-health-walk-in-drive/');
+  });
+
+  it('returns null when every link in the post is promotion', () => {
+    const post = [
+      'If you are Placement/Internship Coordinator at your college, connect with me',
+      'https://www.linkedin.com/in/krishan-kumar08',
+    ].join('\n');
+
+    expect(extractApplyUrl(post)).toBeNull();
+  });
 });

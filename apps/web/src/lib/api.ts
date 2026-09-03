@@ -63,6 +63,11 @@ export interface PublicJob {
   applyUrl: string | null;
   location: string | null;
   employmentType: string | null;
+  /**
+   * The company's logo, resolved from the company name during ingestion, or null.
+   * Null is ordinary — the card falls back to the monogram it has always drawn.
+   */
+  companyLogoUrl: string | null;
   description: string;
   postedAt: string;
   createdAt: string;

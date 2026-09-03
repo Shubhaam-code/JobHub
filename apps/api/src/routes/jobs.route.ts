@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import mongoose from 'mongoose';
 
+import { classifyApplyUrl } from '../apply-url/index.js';
 import { env } from '../config/env.js';
 import { badRequest, notFound } from '../lib/http-error.js';
 import { requireProfile, type ProfileRequest } from '../middleware/require-profile.js';
@@ -132,6 +133,13 @@ export interface PublicJob {
   applyUrl: string | null;
   location: string | null;
   employmentType: string | null;
+  /**
+   * The company's logo, resolved from the company name during ingestion, or null
+   * when none was verified. Null is ordinary: the client already draws a
+   * monogram for it. Not provenance — it is derived from `company`, which this
+   * response already carries.
+   */
+  companyLogoUrl: string | null;
   /** Post text with channel promotion, handles and chat links removed. */
   description: string;
   postedAt: string;
@@ -164,16 +172,24 @@ function resolveDescription(doc: MongoJobDoc): string {
 }
 
 /**
- * Drops an applyUrl that points at a chat or social page.
+ * Drops an applyUrl that is not an application destination.
  *
- * The current pipeline already refuses those as apply links, but jobs stored by
- * the earlier one can carry a `t.me/<channel>` "apply" URL, which would name a
- * source channel on the card.
+ * Two kinds of bad link, both from rows written before the current pipeline: a
+ * chat or social page (`t.me/<channel>`, which would name a source channel on the
+ * card) and an aggregator article about the job. The write path refuses both now,
+ * so this is about the rows already in the collection: the backfill has to visit
+ * a document to fix it, and until it does, this is what stands between a legacy
+ * row and a live Apply button pointing at a competitor's article.
+ *
+ * Only `aggregator` is dropped, matching the schema validator. A `suspicious` or
+ * unresolved link is left visible — it probably works, and hiding a working apply
+ * button on a suspicion is its own kind of damage.
  */
 function resolveApplyUrl(applyUrl: string | null | undefined): string | null {
   if (!applyUrl) return null;
+  if (isPromotionalUrl(applyUrl)) return null;
 
-  return isPromotionalUrl(applyUrl) ? null : applyUrl;
+  return classifyApplyUrl(applyUrl).verdict === 'aggregator' ? null : applyUrl;
 }
 
 const toIso = (value: Date | string): string =>
@@ -188,6 +204,7 @@ export function formatJob(doc: MongoJobDoc): PublicJob {
     applyUrl: resolveApplyUrl(doc.applyUrl),
     location: doc.location ?? null,
     employmentType: doc.employmentType ?? null,
+    companyLogoUrl: doc.companyLogoUrl?.trim() || null,
     description: resolveDescription(doc),
     postedAt: toIso(doc.postedAt),
     createdAt: toIso(doc.createdAt),

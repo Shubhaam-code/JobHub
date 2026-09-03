@@ -87,8 +87,12 @@ const URL_TRAILING_PUNCTUATION = /[.,;:!?…"')\]}]+$/;
 const APPLY_CONTEXT_REGEX =
   /\b(?:apply|application|register|registration|enroll|link|form|career|jobs?|hiring|vacanc\w+|direct|website|portal|drive)\b/i;
 
-/** Hosts and paths that are application systems by construction. */
-const APPLY_TARGET_REGEX =
+/**
+ * Hosts and paths that are application systems by construction. Exported
+ * because `src/apply-url/` judges a link on an aggregator page by the same
+ * shape — one list, so both sides agree on what an apply target looks like.
+ */
+export const APPLY_TARGET_REGEX =
   /(?:careers?|jobs?|apply|recruit\w*|hiring|workday|myworkdayjobs|greenhouse\.io|lever\.co|smartrecruiters|taleo|successfactors|icims|zohorecruit|freshteam|keka|darwinbox|naukri|internshala|unstop|forms\.gle|docs\.google\.com\/forms|linkedin\.com\/jobs|lnkd\.in|indeed|glassdoor|talent|oraclecloud|ashbyhq|wellfound|instahyre|cutshort|joinsuperset)/i;
 
 /** Strips trailing sentence punctuation so the href actually resolves. */

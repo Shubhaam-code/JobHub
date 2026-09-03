@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Briefcase, Clock, GraduationCap, MapPin } from "lucide-react";
 
+import { CompanyLogo } from "@/components/company-logo";
 import { OPPORTUNITY_TYPE_LABELS } from "@/lib/opportunities";
 import { resolveLink } from "@/lib/links";
 import {
@@ -11,7 +12,6 @@ import {
   displayRole,
   formatPostedDate,
   inferOpportunityType,
-  jobMonogram,
 } from "@/lib/job-display";
 import type { PublicJob } from "@/lib/api";
 
@@ -27,7 +27,6 @@ export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
   const company = displayCompany(opportunity);
   const role = displayRole(opportunity);
   const location = displayLocation(opportunity);
-  const monogram = jobMonogram(opportunity);
 
   const type = inferOpportunityType(opportunity.role);
   const TypeIcon = TYPE_ICONS[type];
@@ -40,14 +39,12 @@ export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
     <article className="group relative flex h-full flex-col rounded-lg border border-border bg-surface p-5 shadow-e1 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-e2 focus-within:border-primary">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          {/* Monogram rather than a guessed logo. Tinted with the brand so the
-              card has a spot of colour without inventing a company mark. */}
-          <span
-            aria-hidden="true"
-            className="grid size-10 shrink-0 place-items-center rounded-md bg-primary-soft font-heading text-[15px] leading-none font-semibold text-primary-strong"
-          >
-            {monogram}
-          </span>
+          {/* The company's logo when one was resolved during ingestion, and the
+              monogram in the same tinted square when it was not. */}
+          <CompanyLogo
+            job={opportunity}
+            className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md bg-primary-soft font-heading text-[15px] leading-none font-semibold text-primary-strong"
+          />
           {/* Company sits a step below the role on purpose: the role is what a
               reader scans a grid for, so the company is quieter rather than
               competing at the same weight. */}

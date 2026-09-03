@@ -27,6 +27,26 @@ const COMPANY_COUNT = 8;
 const TERM_COUNT = 6;
 
 type Status = "loading" | "ready" | "error";
+type PaginationItem = number | "ellipsis";
+
+function paginationItems(currentPage: number, totalPages: number): PaginationItem[] {
+  const pages = new Set<number>([1, totalPages]);
+
+  for (
+    let pageNumber = Math.max(1, currentPage - 2);
+    pageNumber <= Math.min(totalPages, currentPage + 2);
+    pageNumber += 1
+  ) {
+    pages.add(pageNumber);
+  }
+
+  const items: PaginationItem[] = [];
+  [...pages].sort((a, b) => a - b).forEach((pageNumber, index, sortedPages) => {
+    if (index > 0 && pageNumber - sortedPages[index - 1] > 1) items.push("ellipsis");
+    items.push(pageNumber);
+  });
+  return items;
+}
 
 /**
  * The landing page.
@@ -43,6 +63,10 @@ export function HomeLanding() {
   const [status, setStatus] = useState<Status>("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const [retryKey, setRetryKey] = useState(0);
+  const [latestJobs, setLatestJobs] = useState<PublicJob[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [pageLoading, setPageLoading] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -53,6 +77,8 @@ export function HomeLanding() {
         if (!live) return;
         setJobs(response.data);
         setTotal(response.pagination.total);
+        setLatestJobs(response.data.slice(0, LATEST_COUNT));
+        setTotalPages(Math.max(1, response.pagination.totalPages));
         setStatus("ready");
       })
       .catch((error: unknown) => {
@@ -67,6 +93,34 @@ export function HomeLanding() {
     };
   }, [retryKey]);
 
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (page === 1) {
+      setLatestJobs(jobs.slice(0, LATEST_COUNT));
+      return;
+    }
+
+    const controller = new AbortController();
+    let live = true;
+    setPageLoading(true);
+
+    fetchJobs({ page, limit: LATEST_COUNT, sort: "newest" }, controller.signal)
+      .then((response) => {
+        if (!live) return;
+        setLatestJobs(response.data);
+        setTotalPages(Math.max(1, response.pagination.totalPages));
+        setPageLoading(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && live) setPageLoading(false);
+      });
+
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [jobs, page, status]);
+
   /* A job ingested while the page is open joins the sample at the front — the
      list is newest-first, so that is where it belongs. The counts and the cards
      both re-derive from it. */
@@ -76,17 +130,19 @@ export function HomeLanding() {
       return [job, ...current].slice(0, SAMPLE_SIZE);
     });
     setTotal((current) => current + 1);
-  }, []);
+    if (page === 1) setLatestJobs((current) => [job, ...current].slice(0, LATEST_COUNT));
+  }, [page]);
 
   useJobSocket(handleNewJob);
 
   const companies = useMemo(() => topCompanies(jobs, COMPANY_COUNT), [jobs]);
   const terms = useMemo(() => popularSearchTerms(jobs, TERM_COUNT), [jobs]);
-  const latest = jobs.slice(0, LATEST_COUNT);
+  const latest = latestJobs;
 
   const handleRetry = () => {
     setStatus("loading");
     setErrorMsg("");
+    setPage(1);
     setRetryKey((key) => key + 1);
   };
 
@@ -266,6 +322,40 @@ export function HomeLanding() {
                   </li>
                 ))}
               </ul>
+            )}
+
+            {latest.length > 0 && totalPages > 1 && (
+              <nav
+                aria-label="Latest jobs pages"
+                className="mt-8 flex flex-nowrap justify-center gap-2 overflow-x-auto px-1"
+              >
+                {paginationItems(page, totalPages).map((item, index) =>
+                  item === "ellipsis" ? (
+                    <span
+                      key={`ellipsis-${index}`}
+                      aria-hidden="true"
+                      className="inline-flex size-10 shrink-0 items-center justify-center text-sm text-muted-foreground"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      aria-current={item === page ? "page" : undefined}
+                      disabled={pageLoading}
+                      onClick={() => setPage(item)}
+                      className={`inline-flex size-10 shrink-0 items-center justify-center rounded-md border text-sm font-semibold transition-colors ${
+                        item === page
+                          ? "border-primary bg-primary text-on-primary"
+                          : "border-border bg-surface text-muted-foreground hover:border-primary/40 hover:bg-primary-soft hover:text-foreground"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  ),
+                )}
+              </nav>
             )}
           </section>
         </>

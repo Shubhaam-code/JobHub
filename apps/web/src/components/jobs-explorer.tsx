@@ -8,6 +8,7 @@ import { JobFiltersPanel } from "@/components/job-filters-panel";
 import { JobListRow } from "@/components/job-list-row";
 import { JobSearchForm } from "@/components/job-search-form";
 import { fetchJobs, type PublicJob } from "@/lib/api";
+import { fetchProfile, type CandidateProfile } from "@/lib/profile";
 import { cacheJobsList, readCachedJobsList } from "@/lib/job-cache";
 import {
   DATE_POSTED_FILTERS,
@@ -208,22 +209,25 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
 type Status = "loading" | "error" | "ready";
 
 /**
- * One row-shaped placeholder.
- *
- * Same box model as `JobListRow` — monogram, two text lines, meta row, action
- * column — so a batch landing replaces a skeleton with a card of about the same
- * height and nothing already read on screen moves.
+ * Compact card placeholder matching `JobListRow`.
  */
 function JobRowSkeleton() {
   return (
-    <div className="flex animate-pulse items-start gap-4 rounded-lg border border-border bg-surface p-4 shadow-e1 sm:gap-5 sm:p-5">
-      <div className="size-12 shrink-0 rounded-md bg-muted" />
-      <div className="min-w-0 flex-1">
-        <div className="h-5 w-2/3 rounded-sm bg-muted" />
-        <div className="mt-2 h-4 w-1/3 rounded-sm bg-muted" />
-        <div className="mt-3 h-6 w-1/2 rounded-sm bg-muted" />
+    <div className="flex min-h-64 animate-pulse flex-col rounded-lg border border-border bg-surface p-5 shadow-e1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="size-10 rounded-md bg-muted" />
+          <div className="h-3.5 w-24 rounded-sm bg-muted" />
+        </div>
+        <div className="h-6 w-20 rounded-sm bg-muted" />
       </div>
-      <div className="hidden h-11 w-28 rounded-md bg-muted sm:block" />
+      <div className="mt-4 h-5 w-11/12 rounded-sm bg-muted" />
+      <div className="mt-2 h-5 w-2/3 rounded-sm bg-muted" />
+      <div className="mt-3.5 h-6 w-1/3 rounded-sm bg-muted" />
+      <div className="mt-auto grid grid-cols-2 gap-2 border-t border-border pt-4">
+        <div className="h-11 rounded-md bg-muted" />
+        <div className="h-11 rounded-md bg-muted" />
+      </div>
     </div>
   );
 }
@@ -271,11 +275,20 @@ function JobsList({
   const [retryKey, setRetryKey] = useState(0);
   /** When the API last answered for this query — see `CachedJobsList.loadedAt`. */
   const [loadedAt, setLoadedAt] = useState(restored?.loadedAt ?? 0);
+  const [profile, setProfile] = useState<CandidateProfile | null>(null);
 
   /* Ids already on screen. Kept in a ref rather than derived from `jobs` so both
      the socket handler and the next batch can decide *before* updating state
      whether a job is new — which is what keeps the count honest. */
   const seenIds = useRef<Set<string>>(new Set<string>(restored?.jobs.map((job) => job.id)));
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchProfile(controller.signal)
+      .then(setProfile)
+      .catch(() => setProfile(null));
+    return () => controller.abort();
+  }, []);
 
   /** The element observed below the list; state, not a ref, so the observer
       effect re-runs when it mounts or unmounts. */
@@ -427,7 +440,9 @@ function JobsList({
           Sort by
           <select
             value={sort}
-            onChange={(event) => onSortChange(event.target.value === "oldest" ? "oldest" : "newest")}
+            onChange={(event) =>
+              onSortChange(event.target.value === "oldest" ? "oldest" : "newest")
+            }
             className="min-h-10 rounded-md border border-border bg-surface px-2 text-sm font-medium text-foreground"
           >
             <option value="newest">Newest</option>
@@ -445,7 +460,7 @@ function JobsList({
       )}
 
       {status === "loading" ? (
-        <ul className="mt-5 flex flex-col gap-4">
+        <ul className="mt-5 grid gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
           {Array.from({ length: 5 }).map((_, index) => (
             <li key={index}>
               <JobRowSkeleton />
@@ -504,10 +519,10 @@ function JobsList({
         </div>
       ) : (
         <>
-          <ul className="mt-5 flex flex-col gap-4">
+          <ul className="mt-5 grid gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
             {jobs.map((job) => (
               <li key={job.id}>
-                <JobListRow job={job} />
+                <JobListRow job={job} profile={profile} />
               </li>
             ))}
 

@@ -4,17 +4,20 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
+  ArrowRight,
   Check,
   FileUp,
   RefreshCw,
   SearchX,
   Sparkles,
   SlidersHorizontal,
+  BriefcaseBusiness,
 } from "lucide-react";
 
 import { InlineLoading } from "@/components/panels";
 import { RecommendationCard } from "@/components/recommendation-card";
-import { fetchRecommendations, type Recommendation } from "@/lib/profile";
+import { fetchProfile, fetchRecommendations, readProfileToken, type CandidateProfile, type Recommendation } from "@/lib/profile";
+import { cacheRecommendations, readCachedRecommendations } from "@/lib/recommendation-cache";
 
 /**
  * The five dimensions `scoreJob` actually scores, in the order the API weights
@@ -79,11 +82,21 @@ function MatchPreview() {
 type Status = "loading" | "no-profile" | "no-preferences" | "ready" | "no-matches" | "error";
 
 export default function RecommendedJobsPage() {
-  const [status, setStatus] = useState<Status>("loading");
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [minScore, setMinScore] = useState(50);
+  const cachedResponse = readCachedRecommendations(readProfileToken(), 20);
+  const initialStatus: Status = cachedResponse === null
+    ? "loading"
+    : !cachedResponse.meta.hasPreferences
+      ? "no-preferences"
+      : cachedResponse.data.length > 0
+        ? "ready"
+        : "no-matches";
+  const [status, setStatus] = useState<Status>(initialStatus);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>(cachedResponse?.data ?? []);
+  const [minScore, setMinScore] = useState(cachedResponse?.meta.minScore ?? 50);
   const [errorMsg, setErrorMsg] = useState("");
   const [retryKey, setRetryKey] = useState(0);
+  const [profile, setProfile] = useState<CandidateProfile | null>(null);
+  const [tab, setTab] = useState<"all" | "top" | "remote">("all");
 
   /* Fetch the caller's recommendations on mount, and again on every retry.
      Written as a promise chain rather than an awaited helper so every state
@@ -92,6 +105,9 @@ export default function RecommendedJobsPage() {
   useEffect(() => {
     let isSubscribed = true;
     const controller = new AbortController();
+
+    const cached = retryKey === 0 ? readCachedRecommendations(readProfileToken(), 20) : null;
+    if (cached !== null) return () => controller.abort();
 
     fetchRecommendations(controller.signal)
       .then((response) => {
@@ -105,6 +121,11 @@ export default function RecommendedJobsPage() {
         }
 
         setMinScore(response.meta.minScore);
+
+        const profileToken = readProfileToken();
+        if (profileToken !== null) {
+          cacheRecommendations(profileToken, 20, response);
+        }
 
         if (!response.meta.hasPreferences) {
           setStatus("no-preferences");
@@ -127,6 +148,12 @@ export default function RecommendedJobsPage() {
     };
   }, [retryKey]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchProfile(controller.signal).then(setProfile).catch(() => undefined);
+    return () => controller.abort();
+  }, [retryKey]);
+
   /* Back to the skeleton while the retry runs, so the failed state does not sit
      there looking live. */
   const handleRetry = () => {
@@ -135,36 +162,81 @@ export default function RecommendedJobsPage() {
     setRetryKey((key) => key + 1);
   };
 
+  const filteredRecommendations = recommendations.filter((item) =>
+    tab === "all"
+      ? true
+      : tab === "top"
+        ? item.matchScore >= 90
+        : /remote/i.test(item.job.location ?? ""),
+  );
+
   return (
     /* No <main> here: the (app) layout already provides the one landmark, and a
        second would nest them and duplicate the skip-link target. */
     <>
-      <section className="border-b border-border/70 bg-gradient-to-b from-surface to-background">
-        <div className="mx-auto w-full max-w-6xl px-4 pt-14 pb-14 text-center sm:px-6 sm:pt-20 sm:pb-16 lg:px-8 lg:pt-24 lg:pb-20">
-          <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface px-2.5 py-1 text-[11px] font-semibold tracking-label text-muted-foreground uppercase">
+      <section className="border-b border-border bg-primary-soft/55">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 pt-10 pb-9 sm:px-6 sm:pt-14 lg:flex-row lg:items-end lg:justify-between lg:px-8 lg:pt-16">
+          <div className="max-w-2xl">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-surface px-3 py-1 text-[11px] font-semibold tracking-label text-primary-strong uppercase">
             <Sparkles className="size-3" aria-hidden="true" />
-            Personalized
+            AI powered matching
           </span>
           <h1 className="mt-4 font-heading text-3xl leading-tight font-semibold tracking-display text-balance text-foreground sm:text-4xl lg:text-5xl">
             Recommended Jobs
           </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+          <p className="mt-3 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
             These jobs match the skills, roles and experience read from your uploaded resume —
             strongest match first.
           </p>
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Link
               href="/dashboard/profile"
               className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-surface px-4 text-sm font-medium text-muted-foreground transition-[background-color,border-color,color] duration-150 hover:border-border-strong hover:bg-muted hover:text-foreground pointer-fine:min-h-10"
             >
               <SlidersHorizontal className="size-4" aria-hidden="true" />
-              Edit your profile
+              Update profile
             </Link>
           </div>
         </div>
       </section>
 
       <section className="mx-auto w-full max-w-6xl px-4 pt-10 pb-16 sm:px-6 sm:pb-20 lg:px-8 lg:pb-24">
+        {profile && (
+          <div className="mb-8 grid gap-4 lg:grid-cols-[1fr_20rem]">
+            <div className="rounded-xl border border-border bg-surface p-5 shadow-e1 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold tracking-label text-primary-strong uppercase">Your match profile</p>
+                  <h2 className="mt-1 font-heading text-xl font-semibold tracking-heading text-foreground">Ready for a better match?</h2>
+                  <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">Keep your preferences current so every recommendation gets more relevant.</p>
+                </div>
+                <span className="grid size-11 shrink-0 place-items-center rounded-full bg-primary-soft text-primary-strong"><BriefcaseBusiness className="size-5" aria-hidden="true" /></span>
+              </div>
+              <div className="mt-5 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${[profile.skills.length > 0, profile.preferredRoles.length > 0, profile.preferredLocations.length > 0, profile.preferredJobTypes.length > 0].filter(Boolean).length * 25}%` }} /></div>
+              <div className="mt-2 flex items-center justify-between text-xs text-subtle-foreground"><span>Profile completeness</span><span className="font-semibold text-foreground">{[profile.skills.length > 0, profile.preferredRoles.length > 0, profile.preferredLocations.length > 0, profile.preferredJobTypes.length > 0].filter(Boolean).length * 25}%</span></div>
+            </div>
+            <Link
+              href="/dashboard/profile"
+              className="group flex items-center justify-between rounded-xl border border-primary/15 bg-primary-soft/45 p-5 shadow-e1 transition-[border-color,box-shadow,transform,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary-soft hover:shadow-e2 focus-visible:border-primary sm:p-6"
+            >
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold tracking-label text-primary-strong uppercase">
+                  Improve your score
+                </span>
+                <span className="mt-1 block font-heading text-base font-semibold text-foreground">
+                  Add skills and preferences
+                </span>
+                <span className="mt-2 block text-sm leading-relaxed text-muted-foreground">
+                  Your profile powers every match.
+                </span>
+              </span>
+              <span className="ml-4 grid size-10 shrink-0 place-items-center rounded-full border border-primary/20 bg-surface text-primary-strong transition-[background-color,transform] duration-200 group-hover:bg-white group-hover:translate-x-0.5">
+                <ArrowRight className="size-5" aria-hidden="true" />
+              </span>
+            </Link>
+          </div>
+        )}
         {status === "loading" ? (
           <>
             {/* The wait is announced on the same rule the match count lands on,
@@ -314,14 +386,25 @@ export default function RecommendedJobsPage() {
                 </span>{" "}
                 {recommendations.length === 1 ? "match" : "matches"} scoring {minScore}% or higher.
               </p>
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1 text-xs font-semibold">
+                {(["all", "top", "remote"] as const).map((value) => (
+                  <button key={value} type="button" onClick={() => setTab(value)} className={`rounded-md px-3 py-1.5 transition-colors ${tab === value ? "bg-primary text-on-primary" : "text-muted-foreground hover:bg-muted"}`}>
+                    {value === "all" ? "All matches" : value === "top" ? "90%+" : "Remote"}
+                  </button>
+                ))}
+              </div>
             </div>
+            {filteredRecommendations.length === 0 ? (
+              <p className="mt-5 rounded-lg border border-dashed border-border-strong bg-surface px-5 py-10 text-center text-sm text-muted-foreground">No jobs match this view. Try another tab.</p>
+            ) : (
             <ul className="mt-5 grid gap-4 md:grid-cols-2 md:gap-5 xl:grid-cols-3">
-              {recommendations.map((recommendation) => (
+              {filteredRecommendations.map((recommendation) => (
                 <li key={recommendation.job.id} className="h-full">
                   <RecommendationCard recommendation={recommendation} />
                 </li>
               ))}
             </ul>
+            )}
           </>
         )}
       </section>

@@ -8,44 +8,25 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Briefcase,
-  Building2,
   Calendar,
-  CheckCircle2,
-  Clock,
   Coins,
   GraduationCap,
   Link2Off,
-  Mail,
   MapPin,
 } from "lucide-react";
 
 import { fetchJob, type PublicJob } from "@/lib/api";
 import { cacheJob, readCachedJob } from "@/lib/job-cache";
+import { CompanyLogo } from "@/components/company-logo";
 import { LinkifiedText } from "@/components/linkified-text";
 import { resolveLink } from "@/lib/links";
 import {
   extractCleanJobDetails,
   isGenuineApplyLink,
-  type CleanJobDetails,
 } from "@/lib/clean-job-content";
 import { DURATION, EASE_OUT } from "@/lib/motion";
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
-
-function formatDate(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return "Unknown date";
-    return d.toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-      timeZone: "UTC",
-    });
-  } catch {
-    return "Unknown date";
-  }
-}
 
 function inferType(role: string | null, explicitType?: string | null): "internship" | "full-time" {
   if (explicitType && /intern/i.test(explicitType)) return "internship";
@@ -218,12 +199,13 @@ export default function JobDetailPage() {
   /* ── Found ── */
   if (!job) return null;
 
-  const cleanDetails: CleanJobDetails = extractCleanJobDetails(job);
+  // Structured extraction remains available only for the existing email CTA
+  // fallback. The post body itself is rendered in source order below.
+  const cleanDetails = extractCleanJobDetails(job);
   const type = inferType(cleanDetails.role || job.role, cleanDetails.employmentType);
   const TypeIcon = type === "internship" ? GraduationCap : Briefcase;
   const displayCompany = cleanDetails.company || job.company?.trim() || "Unknown company";
   const displayRole = cleanDetails.role || job.role?.trim() || "Role not specified";
-  const monogram = (displayCompany || displayRole || "J").charAt(0).toUpperCase();
 
   // Resolve genuine application link. Use applyUrl or application email.
   const rawApply = resolveLink(job.applyUrl);
@@ -245,12 +227,11 @@ export default function JobDetailPage() {
         className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
       >
         <div className="flex min-w-0 items-start gap-3.5">
-          <span
-            aria-hidden="true"
-            className="grid size-12 shrink-0 place-items-center rounded-md border border-border bg-muted font-heading text-lg font-semibold text-foreground sm:size-14 sm:text-xl"
-          >
-            {monogram}
-          </span>
+          {/* Company logo when one was resolved, else the monogram — same box. */}
+          <CompanyLogo
+            job={job}
+            className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-muted font-heading text-lg font-semibold text-foreground sm:size-14 sm:text-xl"
+          />
           <div className="min-w-0">
             <p className="text-[13px] font-semibold tracking-label text-primary uppercase">
               {displayCompany}
@@ -271,68 +252,6 @@ export default function JobDetailPage() {
               : "Full-time"}
         </span>
       </motion.div>
-
-      {/* ── Key Metadata Specification Sheet ── */}
-      <motion.dl
-        {...reveal(1)}
-        className="mt-6 flex flex-wrap gap-x-8 gap-y-4 border-y border-border py-4 sm:mt-7"
-      >
-        {cleanDetails.batch && (
-          <div>
-            <dt className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-              Batch
-            </dt>
-            <dd className="mt-1 text-sm font-semibold text-primary tabular-nums">
-              {cleanDetails.batch}
-            </dd>
-          </div>
-        )}
-        {cleanDetails.location && (
-          <div>
-            <dt className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-              Location
-            </dt>
-            <dd className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
-              <MapPin className="size-3.5 shrink-0 text-subtle-foreground" aria-hidden="true" />
-              <span>
-                <LinkifiedText text={cleanDetails.location} />
-              </span>
-            </dd>
-          </div>
-        )}
-        {cleanDetails.salary && (
-          <div>
-            <dt className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-              Compensation
-            </dt>
-            <dd className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
-              <Coins className="size-3.5 shrink-0 text-subtle-foreground" aria-hidden="true" />
-              <span>
-                <LinkifiedText text={cleanDetails.salary} />
-              </span>
-            </dd>
-          </div>
-        )}
-        {cleanDetails.experience && (
-          <div>
-            <dt className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-              Experience
-            </dt>
-            <dd className="mt-1 text-sm font-medium text-foreground">
-              <LinkifiedText text={cleanDetails.experience} />
-            </dd>
-          </div>
-        )}
-        <div>
-          <dt className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-            Posted
-          </dt>
-          <dd className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
-            <Clock className="size-3.5 shrink-0 text-subtle-foreground" aria-hidden="true" />
-            <span className="tabular-nums">{formatDate(job.postedAt)}</span>
-          </dd>
-        </div>
-      </motion.dl>
 
       {/* ── Action: Apply Link ── */}
       <motion.div {...reveal(2)} className="mt-6">
@@ -363,124 +282,61 @@ export default function JobDetailPage() {
         )}
       </motion.div>
 
-      {/* ── Clean Job Details Section ── */}
+      {/* ── Job Details ── */}
       <motion.section
         {...reveal(3)}
         className="mt-8 border-t border-border pt-6 sm:mt-9"
         aria-labelledby="job-details-heading"
       >
-        <div className="flex items-baseline justify-between gap-3">
-          <h2
-            id="job-details-heading"
-            className="font-heading text-base font-semibold tracking-snug text-foreground"
-          >
-            Job Details
-          </h2>
-        </div>
+        <h2
+          id="job-details-heading"
+          className="font-heading text-base font-semibold tracking-snug text-foreground"
+        >
+          Job Details
+        </h2>
 
-        <div className="mt-4 space-y-4">
-          {/* Structured specs cards */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-md border border-border bg-background p-3.5">
-              <span className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-                Company
-              </span>
-              <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
-                <Building2 className="size-3.5 text-primary shrink-0" aria-hidden="true" />
-                {displayCompany}
-              </p>
-            </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {cleanDetails.role || job.role?.trim() ? (
+            <DetailCard label="Role" icon={<Briefcase aria-hidden="true" />}>
+              {cleanDetails.role || job.role?.trim()}
+            </DetailCard>
+          ) : null}
 
-            <div className="rounded-md border border-border bg-background p-3.5">
-              <span className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-                Role
-              </span>
-              <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
-                <Briefcase className="size-3.5 text-primary shrink-0" aria-hidden="true" />
-                {displayRole}
-              </p>
-            </div>
+          {cleanDetails.location || job.location?.trim() ? (
+            <DetailCard label="Location" icon={<MapPin aria-hidden="true" />}>
+              <LinkifiedText text={cleanDetails.location || job.location?.trim()} />
+            </DetailCard>
+          ) : null}
 
-            {cleanDetails.eligibility && (
-              <div className="rounded-md border border-border bg-background p-3.5 sm:col-span-2">
-                <span className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-                  Eligibility & Qualifications
-                </span>
-                <p className="mt-1 text-sm font-medium leading-relaxed text-foreground">
-                  <LinkifiedText text={cleanDetails.eligibility} />
-                </p>
-              </div>
-            )}
+          {cleanDetails.batch ? (
+            <DetailCard label="Batch" icon={<GraduationCap aria-hidden="true" />}>
+              <LinkifiedText text={cleanDetails.batch} />
+            </DetailCard>
+          ) : null}
 
-            {cleanDetails.skills && (
-              <div className="rounded-md border border-border bg-background p-3.5 sm:col-span-2">
-                <span className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-                  Required Skills
-                </span>
-                <p className="mt-1 text-sm font-medium leading-relaxed text-foreground">
-                  <LinkifiedText text={cleanDetails.skills} />
-                </p>
-              </div>
-            )}
+          {cleanDetails.salary ? (
+            <DetailCard label="Salary" icon={<Coins aria-hidden="true" />}>
+              <LinkifiedText text={cleanDetails.salary} />
+            </DetailCard>
+          ) : null}
 
-            {cleanDetails.deadline && (
-              <div className="rounded-md border border-border bg-background p-3.5">
-                <span className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-                  Application Deadline
-                </span>
-                <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
-                  <Calendar className="size-3.5 text-primary shrink-0" aria-hidden="true" />
-                  <LinkifiedText text={cleanDetails.deadline} />
-                </p>
-              </div>
-            )}
+          {cleanDetails.experience ? (
+            <DetailCard label="Experience">
+              <LinkifiedText text={cleanDetails.experience} />
+            </DetailCard>
+          ) : null}
 
-            {cleanDetails.applyEmail && (
-              <div className="rounded-md border border-border bg-background p-3.5">
-                <span className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
-                  Contact / Apply Email
-                </span>
-                <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
-                  <Mail className="size-3.5 text-primary shrink-0" aria-hidden="true" />
-                  <a
-                    href={`mailto:${cleanDetails.applyEmail}`}
-                    className="font-medium text-primary underline decoration-primary/35 underline-offset-2 hover:text-primary-strong hover:decoration-primary"
-                  >
-                    {cleanDetails.applyEmail}
-                  </a>
-                </p>
-              </div>
-            )}
-          </div>
+          {cleanDetails.eligibility ? (
+            <DetailCard label="Eligibility" wide={needsFullWidth(cleanDetails.eligibility)}>
+              <LinkifiedText text={cleanDetails.eligibility} />
+            </DetailCard>
+          ) : null}
 
-          {/* Clean bullet points if present */}
-          {cleanDetails.cleanBullets.length > 0 && (
-            <div className="rounded-md border border-border bg-background p-4 sm:p-5">
-              <h3 className="mb-3 text-[13px] font-semibold tracking-label text-subtle-foreground uppercase">
-                Highlights & Requirements
-              </h3>
-              <ul className="space-y-2 text-sm leading-relaxed text-muted-foreground">
-                {cleanDetails.cleanBullets.map((bullet, idx) => (
-                  <li key={idx} className="flex items-start gap-2">
-                    <CheckCircle2
-                      className="mt-0.5 size-4 shrink-0 text-primary"
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0">
-                      <LinkifiedText text={bullet} />
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Clean description paragraphs if present */}
-          {cleanDetails.cleanDescription && (
-            <div className="rounded-md border border-border bg-background p-4 sm:p-5 font-body text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              <LinkifiedText text={cleanDetails.cleanDescription} />
-            </div>
-          )}
+          {cleanDetails.deadline ? (
+            <DetailCard label="Last Date" icon={<Calendar aria-hidden="true" />}>
+              <LinkifiedText text={cleanDetails.deadline} />
+            </DetailCard>
+          ) : null}
         </div>
       </motion.section>
 
@@ -510,7 +366,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
 function BackButton({ className }: { className?: string }) {
   return (
     <Link
-      href="/#jobs"
+      href="/jobs"
       className={`group inline-flex min-h-11 items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground pointer-fine:min-h-9 ${className ?? ""}`}
     >
       <ArrowLeft
@@ -520,4 +376,33 @@ function BackButton({ className }: { className?: string }) {
       Back to Opportunities
     </Link>
   );
+}
+
+function DetailCard({
+  label,
+  icon,
+  wide = false,
+  children,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`rounded-md border border-border bg-background p-3.5${wide ? " sm:col-span-2" : ""}`}>
+      <span className="text-[11px] font-semibold tracking-label text-subtle-foreground uppercase">
+        {label}
+      </span>
+      <p className="mt-1 flex items-start gap-1.5 text-sm font-medium leading-relaxed text-foreground">
+        {icon ? <span className="mt-0.5 shrink-0 text-primary [&>svg]:size-3.5">{icon}</span> : null}
+        <span className="min-w-0 break-words">{children}</span>
+      </p>
+    </div>
+  );
+}
+
+/** Keep concise values in the shared two-column rhythm; span only long prose. */
+function needsFullWidth(value: string): boolean {
+  return value.trim().length > 160;
 }

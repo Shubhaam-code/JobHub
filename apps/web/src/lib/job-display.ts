@@ -46,9 +46,25 @@ export function displayRole(job: PublicJob): string {
   return job.role?.trim() || "Role not specified";
 }
 
-/** First letter of whatever the card is titled. A monogram, not a guessed logo. */
+/** First letter of whatever the card is titled. The fallback when no logo exists. */
 export function jobMonogram(job: PublicJob): string {
   return (job.company?.trim() || job.role?.trim() || "J").charAt(0).toUpperCase();
+}
+
+/**
+ * The company's logo URL, or null.
+ *
+ * Resolved server-side during ingestion and stored on the job, so there is no
+ * lookup, guess or third-party request on this side — the client either has a
+ * verified URL or draws the monogram. Only `https` is accepted: an `http` image
+ * on an https page is blocked as mixed content, which would render as a broken
+ * icon rather than as the fallback.
+ */
+export function jobLogoUrl(job: PublicJob): string | null {
+  const url = job.companyLogoUrl?.trim();
+  if (!url) return null;
+
+  return url.startsWith("https://") ? url : null;
 }
 
 /**

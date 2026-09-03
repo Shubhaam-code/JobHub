@@ -155,6 +155,96 @@ export const envSchema = z.object({
     .default('true')
     .transform((value) => value === 'true'),
 
+  // ── Intermediary job links (legacy name) ────────────────────────────────
+  // Reading an aggregator article to find the job's real apply link is now part
+  // of `src/apply-url/`, configured by the `APPLY_URL_*` block below. This is the
+  // name that shipped first; it is kept, and still read, so an existing `.env`
+  // keeps working after the rename.
+  /**
+   * Extra aggregator hostnames, comma-separated, e.g.
+   * "job4freshers.co.in,someblog.com". Merged into the aggregator list in
+   * `src/apply-url/domains.ts` alongside `APPLY_URL_AGGREGATOR_DOMAINS`, which is
+   * the preferred name for new entries. Additive either way, so this can only add
+   * a site, never take one away. A host listed here can never be stored as an
+   * apply link, so add only article/aggregator sites — never a site that hosts
+   * its own job forms.
+   */
+  INTERMEDIARY_JOB_SITES: z.string().trim().default(''),
+
+  // ── Apply-link integrity ────────────────────────────────────────────────
+  // The apply link a user clicks must be the employer's own page or their ATS
+  // form — never a competitor's article about the job. These lists are what
+  // `src/apply-url/` judges a URL against, and they are configuration rather
+  // than code so a newly-observed aggregator can be blocked by editing the
+  // environment and restarting, with no deploy. Each one is *additive*: the
+  // seed lists in `src/apply-url/domains.ts` always apply, so a mangled value
+  // here can only fail to add a domain, never silently unblock one.
+  /**
+   * Extra job-aggregator hostnames, comma-separated. A URL on one of these can
+   * never be stored as an apply link. Derive additions from the host table
+   * printed by `npm run jobs:audit-urls` rather than by guessing.
+   */
+  APPLY_URL_AGGREGATOR_DOMAINS: z.string().trim().default(''),
+  /**
+   * Extra ATS / recruiting-platform hostnames, comma-separated. Being listed
+   * here makes a URL *acceptable*, so add only platforms that host an
+   * employer's own application.
+   */
+  APPLY_URL_TRUSTED_ATS_DOMAINS: z.string().trim().default(''),
+  /** Extra link-shortener / redirect-wrapper hostnames, comma-separated. */
+  APPLY_URL_WRAPPER_DOMAINS: z.string().trim().default(''),
+  /**
+   * Our own frontend hostnames, comma-separated. An apply link pointing at one
+   * is a loop rather than an application, so it is rejected like an aggregator.
+   */
+  APPLY_URL_OWN_DOMAINS: z.string().trim().default(''),
+  /** Per-request timeout when following a shortener or checking a link, in ms. */
+  APPLY_URL_RESOLVE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(8_000),
+  /**
+   * Set to "false" to accept an aggregator apply URL on the write path again.
+   *
+   * The escape hatch for an emergency, not a tuning knob: with it off, ingestion
+   * stores whatever it extracted and only the render guard stands between a bad
+   * row and a live bad link.
+   */
+  APPLY_URL_ENFORCE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+
+  // ── Company logos ───────────────────────────────────────────────────────
+  // A job's `company` is turned into a logo URL and stored on the job, so the
+  // card can show the company's mark instead of a monogram. Entirely optional:
+  // when a name yields no verified logo the field stays null and the UI draws
+  // the same monogram it always has. See `src/telegram/company-logo.ts`.
+  /** Set to "false" to stop looking up logos. Stored logos still display. */
+  COMPANY_LOGO_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /**
+   * Logo/icon provider, with `{domain}` where the company's hostname goes.
+   *
+   * The default needs no key and answers a plain 404 for a domain it has no
+   * icon for, which is exactly the signal the resolver verifies against. A
+   * template without `{domain}` has the hostname appended to it.
+   */
+  COMPANY_LOGO_PROVIDER_URL: z
+    .string()
+    .trim()
+    .min(1)
+    .default('https://icons.duckduckgo.com/ip3/{domain}.ico'),
+  /** Hard ceiling on one provider request, so ingestion never stalls on it. */
+  COMPANY_LOGO_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(5_000),
+  /**
+   * Companies held in the in-process logo cache (hits and misses alike).
+   *
+   * Bounded for the same reason `TELEGRAM_ENTITY_CACHE_MAX` is: the key space is
+   * every company name any channel ever posts, so an uncapped map would grow for
+   * the life of the process.
+   */
+  COMPANY_LOGO_CACHE_MAX: z.coerce.number().int().min(50).max(100_000).default(2_000),
+
   // ── Auth ────────────────────────────────────────────────────────────────
   // Accounts exist only to gate the admin dashboard. AUTH_SECRET signs the
   // bearer tokens issued by POST /api/auth/login: changing it invalidates every
@@ -224,6 +314,16 @@ export interface AppEnv extends RawEnv {
   corsOrigins: string[];
   /** TELEGRAM_CHANNELS split into individual channel usernames (without @). */
   telegramChannels: string[];
+  /** INTERMEDIARY_JOB_SITES split into bare hostnames (lowercased, no www). */
+  intermediaryJobSites: string[];
+  /** APPLY_URL_AGGREGATOR_DOMAINS split into bare hostnames. */
+  applyUrlAggregatorDomains: string[];
+  /** APPLY_URL_TRUSTED_ATS_DOMAINS split into bare hostnames. */
+  applyUrlTrustedAtsDomains: string[];
+  /** APPLY_URL_WRAPPER_DOMAINS split into bare hostnames. */
+  applyUrlWrapperDomains: string[];
+  /** APPLY_URL_OWN_DOMAINS split into bare hostnames. */
+  applyUrlOwnDomains: string[];
   /** Key used to sign auth tokens — AUTH_SECRET, or a dev-only stand-in. */
   authSecret: string;
   isDevelopment: boolean;
@@ -353,6 +453,38 @@ function parseChannelList(raw: string): string[] {
 }
 
 /**
+ * Splits INTERMEDIARY_JOB_SITES into bare hostnames.
+ *
+ * Tolerant about how the value is written — "https://job4freshers.co.in/",
+ * "www.job4freshers.co.in" and "job4freshers.co.in" are the same site — because
+ * a scheme or a trailing slash left in by hand would otherwise match no host at
+ * all, and the only symptom would be an aggregator that is silently never
+ * resolved.
+ */
+function parseHostList(raw: string): string[] {
+  const seen = new Set<string>();
+  const hosts: string[] = [];
+
+  for (const entry of raw.split(',')) {
+    const host = entry
+      .trim()
+      .toLowerCase()
+      .replace(/^[a-z]+:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/[/?#].*$/, '')
+      .replace(/\.+$/, '');
+
+    if (host.length === 0) continue;
+    if (seen.has(host)) continue;
+
+    seen.add(host);
+    hosts.push(host);
+  }
+
+  return hosts;
+}
+
+/**
  * Validates a set of environment variables and returns the typed config.
  * Exported separately from `env` so it can be unit tested with fixtures.
  */
@@ -385,6 +517,11 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     ...data,
     corsOrigins,
     telegramChannels: parseChannelList(data.TELEGRAM_CHANNELS),
+    intermediaryJobSites: parseHostList(data.INTERMEDIARY_JOB_SITES),
+    applyUrlAggregatorDomains: parseHostList(data.APPLY_URL_AGGREGATOR_DOMAINS),
+    applyUrlTrustedAtsDomains: parseHostList(data.APPLY_URL_TRUSTED_ATS_DOMAINS),
+    applyUrlWrapperDomains: parseHostList(data.APPLY_URL_WRAPPER_DOMAINS),
+    applyUrlOwnDomains: parseHostList(data.APPLY_URL_OWN_DOMAINS),
     authSecret: resolveAuthSecret(data.AUTH_SECRET, data.NODE_ENV),
     isDevelopment: data.NODE_ENV === 'development',
     isProduction: data.NODE_ENV === 'production',

@@ -131,12 +131,46 @@ export function isSocialUrl(urlString: string): boolean {
 }
 
 /**
- * True for any link that exists to gather followers — a Telegram/WhatsApp chat
- * or a social page. These are stripped from post text and can never become an
- * applyUrl.
+ * Link-in-bio and link-wrapper services: one page of the channel's own links.
+ *
+ * Never an application form, and it cannot be judged by the destination it hides —
+ * `yt.openinapp.co/job4freshers-yt` is a YouTube channel wearing a host that looks
+ * like a job link, and `linktr.ee/job4freshers.co_in` carries "job" in its path.
+ * Matched by suffix, because these services put the customer on a subdomain.
+ */
+const LINK_WRAPPER_HOSTS = [
+  'openinapp.co',
+  'linktr.ee',
+  'bio.link',
+  'beacons.ai',
+  'linkin.bio',
+  'lnk.bio',
+  'campsite.bio',
+  'carrd.co',
+  'taplink.cc',
+  'komi.io',
+  'linkpop.com',
+  'solo.to',
+  'allmylinks.com',
+];
+
+/** True for a link-in-bio page (`linktr.ee/…`, `yt.openinapp.co/…`). */
+export function isLinkWrapperUrl(urlString: string): boolean {
+  try {
+    const host = new URL(urlString).hostname.toLowerCase().replace(/^www\./, '');
+    return LINK_WRAPPER_HOSTS.some((wrapper) => host === wrapper || host.endsWith(`.${wrapper}`));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True for any link that exists to gather followers — a Telegram/WhatsApp chat,
+ * a social page, or a link-in-bio page collecting all three. These are stripped
+ * from post text and can never become an applyUrl.
  */
 export function isPromotionalUrl(urlString: string): boolean {
-  return isChatUrl(urlString) || isSocialUrl(urlString);
+  return isChatUrl(urlString) || isSocialUrl(urlString) || isLinkWrapperUrl(urlString);
 }
 
 /** Every http(s) URL in the text, in order of appearance. */

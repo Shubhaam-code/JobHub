@@ -162,6 +162,63 @@ export function sanitizeLineText(text: string): string {
 const PROMO_EMAIL_REGEX =
   /(?:promo|promotion|sponsor|collab|collaboration|advertise|business|ads)@/i;
 
+/**
+ * A line whose whole content is an apply/registration label and its URL:
+ * `Apply Link - https://…`, `Registration Link: https://…`, `Apply here 👉 https://…`.
+ *
+ * The Apply button above already carries that destination, so letting the line
+ * through only repeats it as raw text inside Job Details.
+ *
+ * `[^\w\s]*` absorbs whatever punctuation or arrow emoji separates the label from
+ * the URL. Requiring the line to end right after the optional URL is what keeps
+ * genuine prose — `Apply before 30 September`, `Application process has 3 rounds`
+ * — out of this rule.
+ */
+const APPLY_LINK_LINE_REGEX =
+  /^(?:how\s+to\s+)?(?:apply|application|registration|register|enroll|links?)(?:\s+(?:online|now|here|below|link|url|form|page|website|process))*\s*[^\w\s]*\s*(?:(?:https?:\/\/|www\.)\S+)?\s*$/i;
+
+/** Title separators an aggregator headline strings its parts together with. */
+const TITLE_SEPARATOR_REGEX = /[|–—]/;
+
+/** Headline vocabulary: `Off Campus Drive 2026`, `Recruitment 2026`, `Walk-in Drive`. */
+const DRIVE_HEADLINE_REGEX =
+  /\b(?:off[-\s]?campus|on[-\s]?campus|walk[-\s]?in|recruitment|hiring\s+drive|mega\s+drive|drive\s+\d{4})\b/i;
+
+/**
+ * True for a line that only restates the post's own headline, such as
+ * `Fujitsu Off Campus Drive 2026 – Software Engineer Apprentice | B.E/B.Tech | Bangalore`.
+ *
+ * The page header already shows the company and the role, so this line is the
+ * duplicate title users see inside Job Details.
+ *
+ * Sentence punctuation is what tells a headline apart from prose that happens to
+ * name both: a headline runs its parts together with `|` or `–` and never closes
+ * a sentence, so an "About the company" paragraph is never dropped here. `B.E`
+ * and `4.5 LPA` are unaffected — their dots are not followed by a space.
+ */
+function isRepeatedHeadline(line: string, company: string | null, role: string | null): boolean {
+  if (line.length > 140) return false;
+  if (/[.!?](?:\s|$)/.test(line)) return false;
+
+  const lower = line.toLowerCase();
+  if (
+    company &&
+    role &&
+    lower.includes(company.toLowerCase()) &&
+    lower.includes(role.toLowerCase())
+  )
+    return true;
+
+  /* Same headline with the role left out — `Fujitsu Off Campus Drive 2026 | Bangalore`.
+     Anchored on the company so an eligibility line that merely says "drive" stays. */
+  return Boolean(
+    company &&
+    lower.startsWith(company.toLowerCase()) &&
+    DRIVE_HEADLINE_REGEX.test(line) &&
+    TITLE_SEPARATOR_REGEX.test(line),
+  );
+}
+
 export interface CleanJobDetails {
   company: string | null;
   role: string | null;
@@ -322,12 +379,10 @@ export function extractCleanJobDetails(job: PublicJob): CleanJobDetails {
 
     if (matchedKey) continue;
 
-    // Check if line is an apply URL line (e.g. "Apply here: https://...")
-    if (
-      /^(?:apply|registration|register|apply\s+online|link)\s*[:\-]?\s*(https?:\/\/.*)?$/i.test(
-        cleanedLine,
-      )
-    ) {
+    // Drop an apply/registration line whose only payload is the URL the Apply
+    // button already points at — checked after the bullet marker is stripped, so
+    // `• Apply Link - https://…` is caught too.
+    if (APPLY_LINK_LINE_REGEX.test(cleanedLine)) {
       continue;
     }
 
@@ -350,15 +405,7 @@ export function extractCleanJobDetails(job: PublicJob): CleanJobDetails {
   const filteredDescriptionLines = descriptionLines.filter((l) => {
     if (company && l.toLowerCase() === company.toLowerCase()) return false;
     if (role && l.toLowerCase() === role.toLowerCase()) return false;
-    if (
-      company &&
-      role &&
-      l.toLowerCase().includes(company.toLowerCase()) &&
-      l.toLowerCase().includes(role.toLowerCase()) &&
-      l.length < 80
-    ) {
-      return false;
-    }
+    if (isRepeatedHeadline(l, company, role)) return false;
     return true;
   });
 

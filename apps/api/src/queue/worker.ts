@@ -23,9 +23,12 @@ import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { jobFinished, jobStarted } from '../lib/memory-reporter.js';
 import { broadcastNewJob } from '../lib/socket.js';
-import { JobModel } from '../models/job.model.js';
+import { decideIngestApplyUrl } from '../apply-url/ingest-decision.js';
+import { findStoredCompanyLogoUrl } from '../models/job.model.js';
+import { saveJob } from '../models/job.repository.js';
 import { type IngestQueueDocument } from '../models/ingest-queue.model.js';
 import { formatJob, type MongoJobDoc } from '../routes/jobs.route.js';
+import { findCompanyLogoUrl } from '../telegram/company-logo.js';
 import { evaluateJobPost } from '../telegram/ingestion.js';
 import { claimNextMessage, markCompleted, scheduleRetry } from './ingest-queue.js';
 
@@ -53,12 +56,45 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * The company's logo for a job about to be stored, or null.
+ *
+ * Wrapped in its own try/catch, and separate from the `JobModel.create` below, so
+ * that this is a decoration on the write rather than part of it: a provider
+ * outage, a slow DNS lookup or an unreachable database on the reuse query all end
+ * here as `null`, and the job is stored exactly as it would have been before this
+ * feature existed.
+ *
+ * A logo already stored for the same company is preferred over a fresh lookup —
+ * one request per company, not one per posting.
+ */
+async function resolveLogoForCompany(
+  company: string | null,
+  ref: string,
+): Promise<string | null> {
+  try {
+    const storedLogoUrl = await findStoredCompanyLogoUrl(company).catch(() => null);
+    return await findCompanyLogoUrl(company, { storedLogoUrl });
+  } catch (error: unknown) {
+    logger.debug(`${ref} company logo lookup skipped → ${errorText(error)}`);
+    return null;
+  }
+}
+
+/**
  * Classifies one claimed message and stores the resulting job.
  *
  * The apply URL is taken from the queue entry — extracted deterministically from
  * the raw post during normalization — and only falls back to the model's value
  * when normalization found none. That is what guarantees the link a user clicks
  * is the link the channel published: the LLM cannot shorten, rewrite or invent it.
+ *
+ * That link then passes through `decideIngestApplyUrl`, which has one rule: the
+ * apply field holds a link judged to be the employer's own page or their ATS, or
+ * it holds nothing. A direct link — the overwhelming majority — is stored
+ * untouched with no request made. An aggregator article is opened once and the
+ * real apply link read out of it; when that fails, or the page offers no
+ * convincing link, the article is kept as `sourceUrl` provenance and the row is
+ * left for review rather than shipping an article as the Apply button.
  */
 async function processEntry(entry: IngestQueueDocument): Promise<ProcessResult> {
   const queueJobId = entry._id.toString();
@@ -104,20 +140,49 @@ async function processEntry(entry: IngestQueueDocument): Promise<ProcessResult> 
 
   const { job } = evaluation;
 
+  /* Deterministic extraction wins; the model's URL is only a fallback.
+
+     What that URL becomes is decided by `decideIngestApplyUrl`: a direct link is
+     stored as-is, a shortener is resolved first, and an aggregator article is
+     opened so the real apply link inside it can be stored instead — with the
+     article kept as `sourceUrl` either way.
+
+     When none of that yields a link we can defend, the apply field is left empty
+     and the job is stored as `needs_review`. That is the deliberate change from
+     the previous behaviour, which fell back to storing the aggregator URL. */
+  const postedApplyUrl = entry.applyUrl ?? job.applyUrl;
+  const applyDecision = await decideIngestApplyUrl({
+    postedUrl: postedApplyUrl,
+    company: job.company,
+    ref,
+  });
+
+  if (applyDecision.applyUrl !== null && applyDecision.applyUrl !== postedApplyUrl) {
+    logger.info(`${ref} apply url → ${applyDecision.applyUrl} (${applyDecision.reason})`);
+  } else if (applyDecision.applyUrl === null && postedApplyUrl !== null) {
+    logger.warn(`${ref} apply url not stored → ${applyDecision.reason}`);
+  }
+
+  const companyLogoUrl = await resolveLogoForCompany(job.company, ref);
+
   try {
-    const created = await JobModel.create({
+    const created = await saveJob({
       company: job.company,
       role: job.role,
       batch: job.batch,
-      // Deterministic extraction wins; the model's URL is only a fallback.
-      applyUrl: entry.applyUrl ?? job.applyUrl,
+      applyUrl: applyDecision.applyUrl,
+      sourceUrl: applyDecision.sourceUrl,
+      applyUrlCandidates: applyDecision.candidates,
       location: job.location,
       employmentType: job.employmentType,
+      companyLogoUrl,
       source: entry.source,
       telegramChannel: entry.telegramChannel,
-      telegramChannelId: entry.telegramChannelId,
+      // Absent and null mean the same thing on a job, and `SaveJobInput` asks for
+      // the explicit form rather than leaving the distinction to Mongoose.
+      telegramChannelId: entry.telegramChannelId ?? null,
       telegramMessageId: entry.telegramMessageId,
-      telegramMessageUrl: entry.telegramMessageUrl,
+      telegramMessageUrl: entry.telegramMessageUrl ?? null,
       originalText: entry.rawMessage,
       cleanedText: entry.cleanedText,
       postedAt: entry.postedAt,

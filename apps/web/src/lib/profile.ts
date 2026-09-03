@@ -50,6 +50,7 @@ export interface RecommendedJob {
   applyUrl: string | null;
   location: string | null;
   employmentType: string | null;
+  companyLogoUrl: string | null;
   description: string;
   postedAt: string;
   createdAt: string;

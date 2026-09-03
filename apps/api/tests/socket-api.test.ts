@@ -20,6 +20,7 @@ describe('Socket.IO realtime updates', () => {
     applyUrl: 'https://example.com/apply-test',
     location: 'Bengaluru',
     employmentType: 'internship',
+    companyLogoUrl: null,
     description: 'TestCorp hiring Full Stack Engineer Intern for 2027 batch',
     postedAt: '2026-08-31T10:00:00.000Z',
     createdAt: '2026-08-31T10:00:05.000Z',

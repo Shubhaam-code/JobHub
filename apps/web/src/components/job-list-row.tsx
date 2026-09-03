@@ -1,10 +1,11 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Briefcase, Clock, GraduationCap, MapPin, Users } from "lucide-react";
+import { Briefcase, Check, Clock, GraduationCap, MapPin, Sparkles, Users } from "lucide-react";
 
+import { CompanyLogo } from "@/components/company-logo";
 import { OPPORTUNITY_TYPE_LABELS } from "@/lib/opportunities";
-import { resolveLink } from "@/lib/links";
 import {
   displayCompany,
   displayEmploymentType,
@@ -12,108 +13,166 @@ import {
   displayRole,
   formatPostedDate,
   inferOpportunityType,
-  jobMonogram,
 } from "@/lib/job-display";
 import type { PublicJob } from "@/lib/api";
+import type { CandidateProfile } from "@/lib/profile";
+import { matchJob } from "@/lib/job-match";
 
 const TYPE_ICONS = {
   internship: GraduationCap,
   "full-time": Briefcase,
 } as const;
 
-/**
- * One listing as a full-width row — the shape the Jobs page uses.
- *
- * The same job as `OpportunityCard`, laid out for scanning a long list rather
- * than a grid: role first, then the facts that decide whether to open it, then
- * the action. There is deliberately no bookmark control: nothing in the API
- * stores a saved job, so the icon would be decoration that pretends to persist.
- */
-export function JobListRow({ job }: { job: PublicJob }) {
+/** One compact listing card used by the Jobs page grid. */
+export function JobListRow({ job, profile }: { job: PublicJob; profile: CandidateProfile | null }) {
   const company = displayCompany(job);
   const role = displayRole(job);
   const location = displayLocation(job);
   const employmentType = displayEmploymentType(job);
-  const monogram = jobMonogram(job);
 
   const type = inferOpportunityType(job.role);
   const TypeIcon = TYPE_ICONS[type];
-  const applyLink = resolveLink(job.applyUrl);
+  const match = matchJob(profile, job);
+  const [whyOpen, setWhyOpen] = useState(false);
+  const matchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!whyOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!matchRef.current?.contains(event.target as Node)) setWhyOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [whyOpen]);
 
   return (
-    <article className="group relative flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 shadow-e1 transition-[border-color,box-shadow] duration-200 hover:border-primary/40 hover:shadow-e2 focus-within:border-primary sm:flex-row sm:items-start sm:gap-5 sm:p-5">
-      <span
-        aria-hidden="true"
-        className="grid size-12 shrink-0 place-items-center rounded-md bg-primary-soft font-heading text-lg leading-none font-semibold text-primary-strong"
-      >
-        {monogram}
-      </span>
-
-      <div className="min-w-0 flex-1">
-        <h3 className="text-base leading-snug font-semibold tracking-snug text-foreground sm:text-lg">
-          <Link
-            href={`/jobs/${job.id}`}
-            className="rounded-sm before:absolute before:inset-0 before:rounded-lg before:content-['']"
+    <article className="group relative flex h-full flex-col rounded-lg border border-border bg-surface p-5 shadow-e1 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-e2 focus-within:border-primary">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <CompanyLogo
+            job={job}
+            className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md bg-primary-soft font-heading text-[15px] leading-none font-semibold text-primary-strong"
+          />
+          <p className="truncate text-[13px] font-medium text-muted-foreground">{company}</p>
+        </div>
+        <div className="relative flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setWhyOpen((open) => !open)}
+            aria-expanded={whyOpen}
+            className="hidden"
           >
-            {role}
-          </Link>
-        </h3>
-        <p className="mt-1 truncate text-sm font-medium text-muted-foreground">{company}</p>
-
-        <ul className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-subtle-foreground">
-          <li>
-            <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-muted px-2 py-1 text-[11px] font-semibold tracking-label text-muted-foreground uppercase">
-              <TypeIcon className="size-3" aria-hidden="true" />
-              {OPPORTUNITY_TYPE_LABELS[type]}
-            </span>
-          </li>
-          {/* Only when the source actually recorded one — see displayEmploymentType. */}
-          {employmentType && employmentType.toLowerCase() !== type && (
-            <li className="inline-flex min-w-0 items-center gap-1.5">
-              <Users className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{employmentType}</span>
-            </li>
+            <Sparkles className="size-3" aria-hidden="true" />
+            {match.score === null ? "AI Match: Not enough data" : `AI Match: ${match.score}% Match`}
+          </button>
+          {whyOpen && (
+            <div className="hidden">
+              <p className="text-xs font-semibold text-foreground">Why it matches?</p>
+              {match.score === null ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Add profile skills or preferences to calculate a match.
+                </p>
+              ) : match.reasons.length > 0 ? (
+                <ul className="mt-2 space-y-1.5">
+                  {match.reasons.map((reason) => (
+                    <li
+                      key={reason}
+                      className="flex items-start gap-1.5 text-xs text-muted-foreground"
+                    >
+                      <Check
+                        className={`mt-0.5 size-3 shrink-0 ${reason.startsWith("✕") ? "text-destructive" : "text-primary"}`}
+                        aria-hidden="true"
+                      />
+                      {reason}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">No meaningful match found.</p>
+              )}
+            </div>
           )}
-          {location && (
-            <li className="inline-flex min-w-0 items-center gap-1.5">
-              <MapPin className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{location}</span>
-            </li>
-          )}
-          {job.batch && (
-            <li>
-              <span className="inline-flex items-center rounded-sm bg-primary-soft px-2 py-1 text-xs font-semibold text-primary-strong tabular-nums">
-                Batch {job.batch}
-              </span>
-            </li>
-          )}
-          <li className="inline-flex items-center gap-1.5">
-            <Clock className="size-3.5 shrink-0" aria-hidden="true" />
-            <span className="tabular-nums">{formatPostedDate(job.postedAt)}</span>
-          </li>
-        </ul>
+          <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-muted px-2 py-1 text-[11px] font-semibold tracking-label text-muted-foreground uppercase">
+            <TypeIcon className="size-3" aria-hidden="true" />
+            {OPPORTUNITY_TYPE_LABELS[type]}
+          </span>
+        </div>
       </div>
 
-      {/* z-10 keeps these above the stretched link that covers the row. */}
-      <div className="relative z-10 flex shrink-0 items-center gap-2 sm:flex-col sm:items-stretch">
-        {applyLink ? (
-          <a
-            href={applyLink.href}
-            {...(applyLink.kind === "email"
-              ? {}
-              : { target: "_blank", rel: "noopener noreferrer" })}
-            aria-label={
-              applyLink.kind === "email"
-                ? `Email ${applyLink.text} to apply for ${role} at ${company}`
-                : `Apply for ${role} at ${company} (opens in a new tab)`
-            }
-            className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-sm font-semibold text-on-primary shadow-e1 transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary-strong hover:shadow-e2 active:scale-[0.98] pointer-fine:min-h-10 sm:flex-none"
-          >
-            Apply Now
-            <ArrowUpRight className="size-4 shrink-0" aria-hidden="true" />
-          </a>
-        ) : null}
+      <h3 className="mt-4 line-clamp-2 text-lg leading-snug font-semibold tracking-snug text-balance text-foreground">
+        <Link
+          href={`/jobs/${job.id}`}
+          className="rounded-sm before:absolute before:inset-0 before:rounded-lg before:content-['']"
+        >
+          {role}
+        </Link>
+      </h3>
 
+      <ul className="mt-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-[13px] text-subtle-foreground">
+        {location && (
+          <li className="inline-flex min-w-0 items-center gap-1.5">
+            <MapPin className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{location}</span>
+          </li>
+        )}
+        {employmentType && employmentType.toLowerCase() !== type && (
+          <li className="inline-flex min-w-0 items-center gap-1.5">
+            <Users className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{employmentType}</span>
+          </li>
+        )}
+        {job.batch && (
+          <li>
+            <span className="inline-flex items-center rounded-sm bg-primary-soft px-2 py-1 text-xs font-semibold text-primary-strong tabular-nums">
+              Batch {job.batch}
+            </span>
+          </li>
+        )}
+        <li className="inline-flex items-center gap-1.5">
+          <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="tabular-nums">{formatPostedDate(job.postedAt)}</span>
+        </li>
+      </ul>
+
+      <div className="relative z-10 mt-auto grid gap-3 border-t border-border pt-4">
+        <div ref={matchRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setWhyOpen((open) => !open)}
+            aria-expanded={whyOpen}
+            className="inline-flex items-center gap-1 rounded-sm border border-primary/20 bg-primary-soft px-2 py-1 text-[11px] font-semibold text-primary-strong"
+          >
+            <Sparkles className="size-3" aria-hidden="true" />
+            {match.score === null ? "AI Match: Not enough data" : `AI Match: ${match.score}% Match`}
+          </button>
+          {whyOpen && (
+            <div className="absolute bottom-full left-0 z-20 mb-2 w-64 rounded-md border border-border bg-surface p-3 text-left shadow-e2">
+              <p className="text-xs font-semibold text-foreground">Why it matches?</p>
+              {match.score === null ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Add profile skills or preferences to calculate a match.
+                </p>
+              ) : match.reasons.length > 0 ? (
+                <ul className="mt-2 space-y-1.5">
+                  {match.reasons.map((reason) => (
+                    <li
+                      key={reason}
+                      className="flex items-start gap-1.5 text-xs text-muted-foreground"
+                    >
+                      <Check
+                        className={`mt-0.5 size-3 shrink-0 ${reason.startsWith("✕") ? "text-destructive" : "text-primary"}`}
+                        aria-hidden="true"
+                      />
+                      {reason}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">No meaningful match found.</p>
+              )}
+            </div>
+          )}
+        </div>
         <Link
           href={`/jobs/${job.id}`}
           aria-label={`View details for ${role} at ${company}`}

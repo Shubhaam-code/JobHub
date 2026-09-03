@@ -135,6 +135,28 @@ It also re-runs the deterministic sanitizer over each stored post, which is what
 `applyUrl` on a document written before extraction moved out of the LLM. `telegram:backfill`
 and `jobs:cleanup` both require `GEMINI_API_KEY`.
 
+```bash
+npm run jobs:audit-urls --workspace @jia/api
+```
+
+Read-only report on the apply links already stored: how many listings carry one, which external
+hosts they point at, which channel produced the bad ones, and how many are shorteners that hide
+their destination. Writes nothing, ever — safe against production, and the way to discover a new
+aggregator worth adding to `APPLY_URL_AGGREGATOR_DOMAINS`. Needs no Gemini key.
+
+```bash
+npm run jobs:fix-apply-urls --workspace @jia/api
+```
+
+Re-judges every stored apply link and repairs what it can: an aggregator article is opened, the
+employer's link read out of it, and the article moved to `sourceUrl`. What it cannot resolve it
+flags `needs_review` with its candidates rather than guessing. **Dry run by default** — it prints
+a full decision CSV (`--report=<path>`) and writes nothing until you add `--apply`. Narrow a run
+with `--limit`, `--since`, `--host`, `--id` or `--status`; `--bodies` also rewrites aggregator
+links inside job descriptions, which are rendered live and just as clickable. Every write is
+audited first, so `--revert=<runId>` puts a run back exactly as it was, skipping any row a human
+has touched since. Needs no Gemini key.
+
 ## Scripts
 
 Run from the repository root.
@@ -224,6 +246,12 @@ database.
 | `QUEUE_RETRY_BASE_MS`         | `5000`                                     | First backoff step; doubles per attempt  |
 | `QUEUE_RETRY_MAX_MS`          | `600000`                                   | Backoff ceiling                          |
 | `QUEUE_STALE_CLAIM_MS`        | `300000`                                   | Age at which a claim counts as abandoned |
+| `APPLY_URL_AGGREGATOR_DOMAINS` | _(empty)_ | Extra aggregator hosts. Never storable |
+| `APPLY_URL_TRUSTED_ATS_DOMAINS` | _(empty)_ | Extra ATS hosts that may be stored |
+| `APPLY_URL_WRAPPER_DOMAINS` | _(empty)_ | Extra shorteners; followed, not stored |
+| `APPLY_URL_OWN_DOMAINS` | _(empty)_ | Our own hosts. Rejected like aggregators |
+| `APPLY_URL_RESOLVE_TIMEOUT_MS` | `8000` | Per-request ceiling, 1000–60000 |
+| `APPLY_URL_ENFORCE` | `true` | `false` accepts aggregator links again |
 | `AUTH_SECRET`                 | _(unset)_                                  | Secret. Signs bearer tokens, min 16 char |
 | `AUTH_TOKEN_TTL_HOURS`        | `12`                                       | Token lifetime, 1–720                    |
 | `ADMIN_EMAIL`                 | _(unset)_                                  | Seeds the first ADMIN at startup         |
@@ -312,6 +340,22 @@ paths go through the same pipeline: pre-filter → classify → ground → valid
 - **Validation** runs after the LLM and is the final authority: a posting needs `isJob`, a
   company or a role, and a safe non-chat `applyUrl` if it has one at all. A missing batch,
   apply URL, location or employment type is fine and does not disqualify a genuine posting.
+- **Apply links** obey one rule: the apply field holds a link judged to be the employer's own
+  page or their ATS form, or it holds nothing. A direct company/ATS link is stored byte for byte
+  with no request made. A few channels post an aggregator article about the job
+  (`job4freshers.co.in/microsoft-off-campus-recruitment/`) rather than the job itself, so for a
+  host on that list — and only those — the worker fetches the page once and reads the real apply
+  link out of it, ignoring ads, share buttons, tracking wrappers and the site's own pages. A
+  shortener is followed to its destination and the destination is what gets judged.
+  When the real link cannot be established — blocked, timeout, no convincing link, or two equally
+  plausible ones — the apply field is left **empty**, the article is kept as `sourceUrl`
+  provenance, and the row is marked `needs_review` with its candidates attached. That is the
+  deliberate part: a missing Apply button is a gap, a wrong one is a lie, and the earlier
+  behaviour of falling back to the posted URL is what published articles as apply links.
+  Enforced in three places — the `saveJob()` write path, a Mongoose validator on the field, and a
+  render guard in the jobs route that hides a legacy aggregator link until the backfill reaches
+  it. `APPLY_URL_AGGREGATOR_DOMAINS` and its three sibling lists tune the judgement without a
+  deploy; `npm run jobs:fix-apply-urls` repairs what is already stored. See `src/apply-url/`.
 - **Deduplication** is a unique index on `(telegramChannel, telegramMessageId)`. A duplicate
   key is treated as success, so re-running the backfill inserts nothing and broadcasts
   nothing. The channel is part of the key, so the same message id in two channels is two

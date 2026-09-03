@@ -13,6 +13,7 @@ import {
 
 import { resolveLink } from "@/lib/links";
 import type { Recommendation } from "@/lib/profile";
+import { CompanyLogo } from "@/components/company-logo";
 
 /**
  * Score bands, as a text treatment rather than a filled chip.
@@ -55,7 +56,6 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
 
   const displayCompany = job.company?.trim() || "Opportunity";
   const displayRole = job.role?.trim() || "Role not specified";
-  const monogram = (job.company?.trim() || job.role?.trim() || "J").charAt(0).toUpperCase();
   const isInternship = /intern/i.test(job.employmentType ?? job.role ?? "");
   const TypeIcon = isInternship ? GraduationCap : Briefcase;
 
@@ -67,12 +67,10 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
     <article className="group relative flex h-full flex-col rounded-lg border border-border bg-surface p-5 shadow-e1 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-e2 focus-within:border-primary">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span
-            aria-hidden="true"
-            className="grid size-10 shrink-0 place-items-center rounded-md border border-border bg-muted font-heading text-[15px] leading-none font-semibold text-foreground transition-colors duration-200 group-hover:border-border-strong"
-          >
-            {monogram}
-          </span>
+          <CompanyLogo
+            job={job}
+            className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-primary-soft font-heading text-[15px] leading-none font-semibold text-primary-strong transition-colors duration-200 group-hover:border-primary/40"
+          />
           <span className="truncate text-[13px] font-medium text-muted-foreground">
             {displayCompany}
           </span>
@@ -84,6 +82,7 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
         <span
           className={`inline-flex shrink-0 items-center rounded-sm border px-2 py-0.5 text-[11px] font-medium tabular-nums ${scoreTone(matchScore)}`}
         >
+          <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
           {matchScore}% match
         </span>
       </div>

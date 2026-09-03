@@ -1,5 +1,9 @@
 import { model, Schema, type HydratedDocument, type InferSchemaType } from 'mongoose';
 
+import { classifyApplyUrl } from '../apply-url/classify.js';
+import { APPLY_URL_STATUSES } from '../apply-url/status.js';
+import { env } from '../config/env.js';
+
 /**
  * How long a listing stays in the public feed.
  *
@@ -43,6 +47,45 @@ const jobSchema = new Schema(
     applyUrl: { type: String, default: null },
     location: { type: String, default: null },
     employmentType: { type: String, default: null },
+    /**
+     * The company's logo, resolved from `company` during ingestion.
+     *
+     * Nullable like every other extracted field, and for the same reason: it is
+     * only set when a real logo was verified for the name. Null — and a legacy
+     * row with no such field at all — means the UI draws its monogram, which is
+     * what every card did before this field existed.
+     */
+    companyLogoUrl: { type: String, default: null },
+
+    // ── Apply-link integrity ──────────────────────────────────────────────
+    /**
+     * The page the link was found on, when it was not the application itself —
+     * an aggregator article we resolved through.
+     *
+     * Kept because it is useful provenance (it is how a human checks a resolved
+     * link), and kept *here* rather than in `applyUrl` because it is never a
+     * destination we send a user to. Nothing renders this field.
+     */
+    sourceUrl: { type: String, default: null },
+    /**
+     * Where `applyUrl` stands: `verified`, `needs_review`, `pending`, `broken`.
+     *
+     * Null — and a legacy row with no such field — reads as `needs_review` at
+     * every boundary that cares, so a row stored before this existed is never
+     * mistaken for one a human verified. See `src/apply-url/status.ts`.
+     */
+    applyUrlStatus: { type: String, enum: APPLY_URL_STATUSES, default: null },
+    /** When the link was last classified or health-checked. */
+    applyUrlCheckedAt: { type: Date, default: null },
+    /**
+     * Candidate apply links found on the source page, with their scores and
+     * reasons, for the admin review queue.
+     *
+     * Populated only when the choice was *not* obvious — exactly one
+     * high-confidence candidate is applied directly instead. `Mixed` because the
+     * shape is a report for a human, not something queried on.
+     */
+    applyUrlCandidates: { type: Schema.Types.Mixed, default: null },
 
     // ── Provenance ────────────────────────────────────────────────────────
     source: { type: String, required: true, trim: true },
@@ -104,12 +147,43 @@ jobSchema.pre('save', function fillExpiresAt(this: JobDocument) {
   }
 });
 
+/**
+ * Last-resort net: the database itself refuses an aggregator apply link.
+ *
+ * The real enforcement is `saveJob()`, which every write path goes through, and the
+ * Zod schema in front of the routes. This exists because "every write path" is a
+ * claim that has to stay true as the code grows — a validator on the field is
+ * enforced by Mongoose for any `create`, `save` or `validate`, whoever wrote the
+ * caller and whether or not they remembered the helper.
+ *
+ * Deliberately narrow. It rejects only the verdict that is *definitely* wrong —
+ * `aggregator`, which covers a known aggregator host and a link back at our own
+ * site — and lets `suspicious`, `wrapper` and `unresolvable` through, because those
+ * are cases a human resolves through the review queue and blocking them here would
+ * only lose the row. It also allows null and empty: no link is a valid state.
+ *
+ * `updateOne`/`$set` does not run this by default, which is why the backfill and
+ * the review queue classify explicitly before writing rather than relying on it.
+ */
+jobSchema.path('applyUrl').validate({
+  validator: function validateApplyUrlIsNotAggregator(value: string | null | undefined): boolean {
+    if (!env.APPLY_URL_ENFORCE) return true;
+    if (!value || value.trim().length === 0) return true;
+
+    return classifyApplyUrl(value).verdict !== 'aggregator';
+  },
+  message: (props: { value: string }) =>
+    `applyUrl points at a job aggregator or back at this site, which is never an application destination: ${props.value}`,
+});
+
 // Deduplication: same channel + message ID must never be stored twice.
 jobSchema.index({ telegramChannel: 1, telegramMessageId: 1 }, { unique: true });
 // Query by recency.
 jobSchema.index({ postedAt: -1 });
 // Every user-facing query starts by narrowing to the listings still on show.
 jobSchema.index({ status: 1, expiresAt: -1 });
+// The admin review queue reads by status, oldest-checked first.
+jobSchema.index({ applyUrlStatus: 1, applyUrlCheckedAt: 1 });
 
 export const JobModel = model<Job>('Job', jobSchema);
 
@@ -143,4 +217,32 @@ export function activeJobClauses(now: Date = new Date()): JobQueryFilter[] {
 /** `activeJobClauses` as one filter, for a query with nothing else to add. */
 export function activeJobFilter(now: Date = new Date()): JobQueryFilter {
   return { $and: activeJobClauses(now) };
+}
+
+/**
+ * A logo already stored for this company on some earlier job, or null.
+ *
+ * The reuse path for logo lookups: a channel routinely posts many roles for one
+ * employer, and the first of them is the only one that should cost a request.
+ * The in-process cache covers a single run; this covers a restart, so a company
+ * resolved last week is never probed again.
+ *
+ * Matched case-insensitively on the exact stored name, which is the same company
+ * by any reasonable reading. Never throws for a caller — an unusable name
+ * answers null without a query.
+ */
+export async function findStoredCompanyLogoUrl(
+  company: string | null | undefined,
+): Promise<string | null> {
+  const name = company?.trim();
+  if (name === undefined || name.length === 0) return null;
+
+  const doc = await JobModel.findOne({
+    company: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    companyLogoUrl: { $nin: [null, ''] },
+  })
+    .select({ companyLogoUrl: 1 })
+    .lean<{ companyLogoUrl?: string | null } | null>();
+
+  return doc?.companyLogoUrl?.trim() || null;
 }

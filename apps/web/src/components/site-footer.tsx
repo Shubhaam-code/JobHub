@@ -37,7 +37,6 @@ export function SiteFooter() {
             {/* A <p>, not a heading: an 11px micro-label announced as "heading
                 level 2" would overstate it, and the nav is already labelled. */}
             <p className="text-[10px] font-semibold tracking-label text-subtle-foreground uppercase sm:text-[11px]">
-              Browse
             </p>
             <ul className="mt-2 flex flex-col gap-0.5 sm:mt-3 sm:items-end">
               {FOOTER_LINKS.map((link) => (

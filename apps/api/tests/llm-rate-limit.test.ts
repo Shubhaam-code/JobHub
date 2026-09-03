@@ -19,7 +19,7 @@ describe('createRateLimiter — proactive throttle in front of the provider', ()
   });
 
   it('never allows more calls in flight than the configured concurrency', async () => {
-    let clock = 0;
+    const clock = 0;
     const limiter = createRateLimiter({
       maxRequestsPerMinute: 1_000,
       concurrency: 2,
@@ -134,7 +134,7 @@ describe('createRateLimiter — proactive throttle in front of the provider', ()
   });
 
   it('reset() clears the window, the cool-down and the waiters', async () => {
-    let clock = 0;
+    const clock = 0;
     const limiter = createRateLimiter({
       maxRequestsPerMinute: 1,
       concurrency: 1,
@@ -159,7 +159,7 @@ describe('createRateLimiter — proactive throttle in front of the provider', ()
   });
 
   it('treats a zero ceiling as one request rather than deadlocking', async () => {
-    let clock = 0;
+    const clock = 0;
     const limiter = createRateLimiter({
       maxRequestsPerMinute: 0,
       concurrency: 0,
