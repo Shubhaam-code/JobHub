@@ -95,6 +95,25 @@ export const envSchema = z.object({
    */
   TELEGRAM_CHANNELS: z.string().trim().default('jobs_and_internships_updates'),
 
+  // GitHub README source. The API performs an initial sync at boot and then
+  // refreshes it on this interval while the process is running.
+  GITHUB_JOBS_SYNC_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  GITHUB_JOBS_REPOSITORY_URL: z
+    .string()
+    .trim()
+    .url()
+    .default('https://raw.githubusercontent.com/Chieler/Summer-2027-SWE-Internships/main/README.md'),
+  GITHUB_JOBS_SYNC_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(3_600_000)
+    .max(7 * 24 * 60 * 60 * 1000)
+    .default(24 * 60 * 60 * 1000),
+  GITHUB_JOBS_SYNC_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(20_000),
+
   // LLM (Google Gemini via @google/genai) used to classify posts and extract
   // fields. Optional: without a key the API still boots, but no post can be
   // classified, so nothing is ingested.
@@ -244,6 +263,46 @@ export const envSchema = z.object({
    * the life of the process.
    */
   COMPANY_LOGO_CACHE_MAX: z.coerce.number().int().min(50).max(100_000).default(2_000),
+
+  // ── Universal Apply Link Discovery ──────────────────────────────────────
+  // Background service that discovers and verifies apply URLs for jobs where
+  // initial extraction didn't yield a verified link.
+  /** Set to "false" to disable automatic apply URL discovery. */
+  APPLY_DISCOVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /** Firecrawl API key for JS-rendered page scraping. */
+  FIRECRAWL_API_KEY: optionalValue,
+  /** Enable Firecrawl scraping when direct extraction fails. */
+  APPLY_DISCOVERY_ENABLE_FIRECRAWL: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /**
+   * Enable the web-search stage of discovery.
+   *
+   * On by default now that it is served by Firecrawl's own search endpoint: it
+   * needs no configuration beyond `FIRECRAWL_API_KEY`, and without the key the
+   * stage answers "no results" instead of failing. It is still the last resort —
+   * only a job that got past direct extraction and scraping reaches it, and
+   * `APPLY_DISCOVERY_MAX_EXTERNAL_CALLS` caps what one job may spend.
+   */
+  APPLY_DISCOVERY_ENABLE_WEB_SEARCH: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /** Maximum external API calls per discovery job (cost control). */
+  APPLY_DISCOVERY_MAX_EXTERNAL_CALLS: z.coerce.number().int().min(1).max(20).default(5),
+  /** How many discovery jobs the worker processes concurrently. */
+  APPLY_DISCOVERY_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
+  /** Polling interval when discovery queue is empty, in ms. */
+  APPLY_DISCOVERY_POLL_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(600_000)
+    .default(5_000),
 
   // ── Auth ────────────────────────────────────────────────────────────────
   // Accounts exist only to gate the admin dashboard. AUTH_SECRET signs the

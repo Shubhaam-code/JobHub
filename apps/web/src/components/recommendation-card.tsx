@@ -62,6 +62,9 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
   // The stored apply link, resolved only for safety (mailto vs http) — never
   // rewritten or generated.
   const applyLink = resolveLink(job.applyUrl);
+  
+  // Show apply button only when URL exists AND is verified
+  const showApplyButton = applyLink && job.applyUrlVerified;
 
   return (
     <article className="group relative flex h-full flex-col rounded-lg border border-border bg-surface p-5 shadow-e1 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-e2 focus-within:border-primary">
@@ -142,10 +145,10 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
           across a grid row regardless of how many reasons each card shows. */}
       <div
         className={`relative z-10 mt-auto grid gap-2 border-t border-border pt-4 ${
-          applyLink ? "grid-cols-2" : "grid-cols-1"
+          showApplyButton ? "grid-cols-2" : "grid-cols-1"
         }`}
       >
-        {applyLink ? (
+        {showApplyButton ? (
           <a
             href={applyLink.href}
             {...(applyLink.kind === "email"
@@ -164,6 +167,13 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
               aria-hidden="true"
             />
           </a>
+        ) : applyLink ? (
+          <div
+            className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-border bg-muted px-4 text-sm font-medium text-muted-foreground pointer-fine:min-h-10"
+            title="Apply link verification in progress"
+          >
+            Apply link not available
+          </div>
         ) : null}
 
         <Link

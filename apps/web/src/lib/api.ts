@@ -72,6 +72,11 @@ export interface PublicJob {
   postedAt: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Whether the apply URL was verified by the universal discovery agent.
+   * true = verified with strong evidence, false = not verified or pending.
+   */
+  applyUrlVerified: boolean;
 }
 
 export interface JobsPagination {
@@ -84,6 +89,25 @@ export interface JobsPagination {
 export interface JobsResponse {
   data: PublicJob[];
   pagination: JobsPagination;
+}
+
+/**
+ * What the Global Internships feed reports about itself.
+ *
+ * `windowStart` is the oldest date the feed will answer for — the date picker
+ * bounds itself to it rather than offering days that return nothing.
+ */
+export interface GlobalInternshipsMeta {
+  source: string;
+  activeWindowDays: number;
+  windowStart?: string;
+  windowEnd?: string;
+  degraded?: boolean;
+  message?: string;
+}
+
+export interface GlobalInternshipsResponse extends JobsResponse {
+  meta?: GlobalInternshipsMeta;
 }
 
 export interface FetchJobsParams {
@@ -193,6 +217,56 @@ export async function fetchJob(id: string, signal?: AbortSignal): Promise<Public
     throw new Error(`API responded with ${response.status} ${response.statusText}`);
   }
 
+  const body = (await response.json()) as { data: PublicJob };
+  return body.data;
+}
+
+export async function fetchGlobalInternships(
+  params?: Pick<
+    FetchJobsParams,
+    'page' | 'limit' | 'search' | 'location' | 'sort' | 'postedFrom' | 'postedTo'
+  >,
+  signal?: AbortSignal,
+): Promise<GlobalInternshipsResponse> {
+  const query = new URLSearchParams();
+  if (params?.page !== undefined && params.page > 0) query.set('page', String(params.page));
+  if (params?.limit !== undefined && params.limit > 0) query.set('limit', String(params.limit));
+  if (params?.search?.trim()) query.set('search', params.search.trim());
+  if (params?.location?.trim()) query.set('location', params.location.trim());
+  if (params?.postedFrom) query.set('postedFrom', params.postedFrom);
+  if (params?.postedTo) query.set('postedTo', params.postedTo);
+  if (params?.sort) query.set('sort', params.sort);
+
+  const suffix = query.toString() ? '?' + query.toString() : '';
+  const response = await fetch(apiUrl('/api/v1/global-internships' + suffix), {
+    signal,
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!response.ok) {
+    throw new Error('API responded with ' + response.status + ' ' + response.statusText);
+  }
+  return (await response.json()) as GlobalInternshipsResponse;
+}
+
+export async function fetchGlobalInternship(
+  id: string,
+  signal?: AbortSignal,
+): Promise<PublicJob> {
+  const response = await fetch(
+    apiUrl('/api/v1/global-internships/' + encodeURIComponent(id)),
+    {
+      signal,
+      headers: { Accept: 'application/json' },
+    },
+  );
+
+  if (response.status === 404) {
+    throw Object.assign(new Error('Internship not found'), { status: 404 });
+  }
+  if (!response.ok) {
+    throw new Error('API responded with ' + response.status + ' ' + response.statusText);
+  }
   const body = (await response.json()) as { data: PublicJob };
   return body.data;
 }

@@ -3,7 +3,9 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
+import { GITHUB_SOURCE } from '../src/github/sync.js';
 import { JobModel } from '../src/models/job.model.js';
+import { resolvePublicApplyUrl } from '../src/routes/jobs.route.js';
 import { normalizeMessage } from '../src/telegram/normalize.js';
 
 const app = createApp();
@@ -13,19 +15,34 @@ type FindOneMock = ReturnType<typeof JobModel.findOne>;
 
 /**
  * The two clauses every user-facing job query starts with: active status, and an
- * expiry still ahead (see `activeJobClauses`). Spelled out here rather than
- * imported from the model, so changing the visibility rule has to be restated in
- * the tests instead of being silently absorbed by them.
+ * expiry still ahead and a recent source date (see `activeJobClauses`). Spelled
+ * out here rather than imported from the model, so changing the visibility rule
+ * has to be restated in the tests instead of being silently absorbed by them.
  */
 const ACTIVE_CLAUSES = [
   { $or: [{ status: 'active' }, { status: null }] },
   {
     $or: [
       { expiresAt: { $gt: expect.any(Date) } },
-      { expiresAt: null, createdAt: { $gt: expect.any(Date) } },
+      { expiresAt: null, postedAt: { $gte: expect.any(Date) } },
     ],
   },
+  { postedAt: { $gte: expect.any(Date) } },
 ];
+
+/**
+ * What `GET /api/v1/jobs` narrows every query to: the active clauses, plus the
+ * exclusion that keeps GitHub Global Internships out of this feed. They have
+ * their own endpoint, and a listing that appears in both places reads as a
+ * duplicate to anyone browsing.
+ *
+ * Note what is *not* here: apply-link verification. It decides whether a card can
+ * offer an Apply button, never whether the posting is listed — gating visibility
+ * on it hid entire jobs while background discovery was still pending. The
+ * assertions below spell the whole filter out, so re-introducing such a clause
+ * fails a test rather than silently emptying the feed.
+ */
+const LIST_CLAUSES = [...ACTIVE_CLAUSES, { source: { $nin: [GITHUB_SOURCE] } }];
 
 /** Provenance the public API must never echo back. */
 const TELEGRAM_FIELDS = [
@@ -167,6 +184,9 @@ describe('GET /api/v1/jobs', () => {
       postedAt: sampleJob2.postedAt.toISOString(),
       createdAt: sampleJob2.createdAt.toISOString(),
       updatedAt: sampleJob2.updatedAt.toISOString(),
+      // A row the discovery agent has not verified travels as false, never absent:
+      // the card reads this to decide whether to render an Apply button.
+      applyUrlVerified: false,
     });
     expect(response.body.data[0]._id).toBeUndefined();
     expect(response.body.data[0].__v).toBeUndefined();
@@ -224,7 +244,7 @@ describe('GET /api/v1/jobs', () => {
 
     expect(response.status).toBe(200);
     expect(findSpy).toHaveBeenCalledWith({
-      $and: [...ACTIVE_CLAUSES, { $or: [{ company: expect.any(RegExp) }, { role: expect.any(RegExp) }] }],
+      $and: [...LIST_CLAUSES, { $or: [{ company: expect.any(RegExp) }, { role: expect.any(RegExp) }] }],
     });
   });
 
@@ -237,7 +257,7 @@ describe('GET /api/v1/jobs', () => {
 
     expect(response.status).toBe(200);
     expect(findSpy).toHaveBeenCalledWith({
-      $and: [...ACTIVE_CLAUSES, { batch: expect.any(RegExp) }],
+      $and: [...LIST_CLAUSES, { batch: expect.any(RegExp) }],
     });
   });
 
@@ -270,8 +290,8 @@ describe('GET /api/v1/jobs', () => {
 
     expect(response.status).toBe(200);
     // No telegramChannel clause: a caller cannot probe for which channels exist.
-    // The expiry clauses are all that narrows the query.
-    expect(findSpy).toHaveBeenCalledWith({ $and: ACTIVE_CLAUSES });
+    // The expiry and source clauses are all that narrows the query.
+    expect(findSpy).toHaveBeenCalledWith({ $and: LIST_CLAUSES });
   });
 
   it('6d. scrubs a legacy row that has no stored cleanedText', async () => {
@@ -306,6 +326,23 @@ describe('GET /api/v1/jobs', () => {
     // The rest of the posting is still served: only the link is withheld.
     expect(job.company).toBe('Cognizant');
     expect(job.role).toBe('Programmer Analyst Trainee');
+  });
+
+  it('6f. lists a Telegram job whose apply link has not been verified', async () => {
+    const mockQuery = createMockFindQuery([sampleJob1]);
+    const findSpy = vi.spyOn(JobModel, 'find').mockReturnValue(mockQuery as unknown as FindMock);
+    vi.spyOn(JobModel, 'countDocuments').mockResolvedValue(1);
+
+    const response = await request(app).get('/api/v1/jobs');
+
+    expect(response.status).toBe(200);
+    /* The regression this guards: requiring `applyUrlVerified` here removed the
+       whole posting from the feed, not just its Apply button. A job is worth
+       reading on its company, role and description while discovery is still
+       pending — so it is listed, and the card decides what to do about Apply. */
+    expect(JSON.stringify(findSpy.mock.calls)).not.toMatch(/applyUrlVerified/);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].applyUrlVerified).toBe(false);
   });
 
   it('7. handles empty results gracefully', async () => {
@@ -353,6 +390,21 @@ describe('GET /api/v1/jobs', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error.statusCode).toBe(400);
+  });
+});
+
+describe('resolvePublicApplyUrl', () => {
+  it('preserves a valid legacy URL and its query parameters', () => {
+    expect(
+      resolvePublicApplyUrl(
+        'https://careers.example.com/careers/apply?job=42&ref=partner',
+      ),
+    ).toBe('https://careers.example.com/careers/apply?job=42&ref=partner');
+  });
+
+  it('withholds malformed and aggregator values instead of rendering a CTA', () => {
+    expect(resolvePublicApplyUrl('javascript:alert(1)')).toBeNull();
+    expect(resolvePublicApplyUrl('https://freshershunt.in/example-job')).toBeNull();
   });
 });
 
@@ -407,6 +459,7 @@ describe('GET /api/v1/jobs/:id', () => {
         postedAt: sampleJob1.postedAt.toISOString(),
         createdAt: sampleJob1.createdAt.toISOString(),
         updatedAt: sampleJob1.updatedAt.toISOString(),
+        applyUrlVerified: false,
       },
     });
   });

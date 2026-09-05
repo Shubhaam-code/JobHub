@@ -21,7 +21,15 @@ const MAX_HTML_BYTES = 2_000_000;
 
 const USER_AGENT = 'Mozilla/5.0 (compatible; JobHubBot/1.0; +https://github.com/jobhub)';
 
-export type FetchPageResult = { ok: true; html: string } | { ok: false; reason: string };
+export type FetchPageResult =
+  /**
+   * `finalUrl` is where the redirect chain ended. It matters to a caller judging
+   * the page: an ATS link that lands on a generic "job not found" search page is a
+   * different thing from one that lands on the posting, and only the final URL
+   * shows the difference.
+   */
+  | { ok: true; html: string; finalUrl: string }
+  | { ok: false; reason: string };
 
 export interface FetchPageOptions {
   timeoutMs?: number;
@@ -94,7 +102,13 @@ export async function fetchPageHtml(
       return { ok: false, reason: `page is not html (${contentType})` };
     }
 
-    return { ok: true, html: await readCappedText(response) };
+    return {
+      ok: true,
+      html: await readCappedText(response),
+      /* A hand-built `Response` (a test stub, or a polyfill) reports an empty
+         `url`; the requested URL is the honest answer in that case. */
+      finalUrl: response.url.length > 0 ? response.url : pageUrl,
+    };
   } catch (error: unknown) {
     return {
       ok: false,

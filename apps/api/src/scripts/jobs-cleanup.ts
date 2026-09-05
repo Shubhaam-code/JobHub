@@ -39,6 +39,7 @@ const CONFIGURED_ONLY = process.argv.includes('--configured-only');
 
 interface StoredJob {
   _id: unknown;
+  source?: string | null;
   company: string | null;
   role: string | null;
   batch: string | null;
@@ -98,6 +99,15 @@ async function main(): Promise<void> {
   let undecided = 0;
 
   for (const doc of docs) {
+    // GitHub rows are already normalized source data, not Telegram posts. The
+    // Telegram LLM cleanup must never reinterpret their Markdown row and delete
+    // a valid external-source listing.
+    if (doc.source !== undefined && doc.source !== null && doc.source !== 'telegram') {
+      kept += 1;
+      logger.debug(`[${doc.source}] skipping non-Telegram source`);
+      continue;
+    }
+
     const ref = `[@${doc.telegramChannel} msg ${doc.telegramMessageId}]`;
     const evaluation = await evaluateJobPost(doc.originalText);
 

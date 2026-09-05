@@ -8,10 +8,80 @@
  * something, and neither row claims a partnership or a trend that does not exist.
  */
 import type { PublicJob } from "@/lib/api";
+import { jobLogoUrl } from "@/lib/job-display";
 
 export interface CompanyTally {
   name: string;
   count: number;
+}
+
+/**
+ * A logo is a brand-level decoration, not a reason to merge job entities. Keep
+ * the tally grouping deliberately conservative, but let common legal/entity
+ * suffixes and well-known brand spellings share an already-stored logo.
+ */
+const COMPANY_LOGO_ALIASES = new Map<string, string>([
+  ["amazoncom", "amazon"],
+  ["deloitteus", "deloitte"],
+  ["deloitteindia", "deloitte"],
+  ["eurofinsanalyticalservices", "eurofins"],
+]);
+
+const LEGAL_SUFFIXES = new Set([
+  "ag",
+  "bv",
+  "co",
+  "company",
+  "corp",
+  "corporation",
+  "gmbh",
+  "inc",
+  "incorporated",
+  "limited",
+  "llc",
+  "llp",
+  "ltd",
+  "plc",
+  "private",
+  "pvt",
+  "sa",
+]);
+
+function companyLogoKey(name: string): string {
+  const words = name
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  while (words.length > 1 && LEGAL_SUFFIXES.has(words.at(-1) ?? "")) words.pop();
+
+  const compact = words.join("");
+  return COMPANY_LOGO_ALIASES.get(compact) ?? compact;
+}
+
+/**
+ * Finds a job carrying the best logo for a company tally. The returned job is
+ * also the fallback source for the shared monogram when no logo exists.
+ */
+export function companyLogoJob(
+  jobs: readonly PublicJob[],
+  companyName: string,
+): PublicJob | null {
+  const key = companyLogoKey(companyName);
+  let fallback: PublicJob | null = null;
+
+  for (const job of jobs) {
+    const company = job.company?.trim();
+    if (!company || companyLogoKey(company) !== key) continue;
+
+    fallback ??= job;
+    if (jobLogoUrl(job) !== null) return job;
+  }
+
+  return fallback;
 }
 
 /**

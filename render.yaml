@@ -79,6 +79,12 @@ services:
       # than here so the list can change without a redeploy of the blueprint.
       - key: TELEGRAM_CHANNELS
         sync: false
+      - key: GITHUB_JOBS_SYNC_ENABLED
+        value: "true"
+      - key: GITHUB_JOBS_REPOSITORY_URL
+        value: https://raw.githubusercontent.com/Chieler/Summer-2027-SWE-Internships/main/README.md
+      - key: GITHUB_JOBS_SYNC_INTERVAL_MS
+        value: "86400000"
       - key: LOG_LEVEL
         value: info
       - key: GEMINI_MODEL

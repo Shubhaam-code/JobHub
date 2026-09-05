@@ -207,17 +207,24 @@ export default function JobDetailPage() {
   const displayCompany = cleanDetails.company || job.company?.trim() || "Unknown company";
   const displayRole = cleanDetails.role || job.role?.trim() || "Role not specified";
 
-  // Resolve genuine application link. Use applyUrl or application email.
+  /* Resolve the application link, in the same order every card uses.
+     `applyUrlVerified` is the gate: a stored link is only offered once discovery has
+     proven it is this posting's own application page. Without that check an
+     unverified link — an aggregator article, or a careers index that happens to
+     parse as a URL — would be presented as "Apply Now" here even though the cards
+     that link to this page hide it. An application email is a different kind of
+     evidence: it comes from the post's own text, so it stands on its own. */
   const rawApply = resolveLink(job.applyUrl);
-  const applyLink = isGenuineApplyLink(rawApply)
-    ? rawApply
-    : cleanDetails.applyEmail
-      ? {
-          kind: "email" as const,
-          text: cleanDetails.applyEmail,
-          href: `mailto:${cleanDetails.applyEmail}`,
-        }
-      : null;
+  const applyLink =
+    job.applyUrlVerified && isGenuineApplyLink(rawApply)
+      ? rawApply
+      : cleanDetails.applyEmail
+        ? {
+            kind: "email" as const,
+            text: cleanDetails.applyEmail,
+            href: `mailto:${cleanDetails.applyEmail}`,
+          }
+        : null;
 
   return (
     <PageShell>
@@ -277,7 +284,7 @@ export default function JobDetailPage() {
         ) : (
           <p className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-dashed border-border-strong bg-muted/50 px-5 text-center text-sm font-medium text-subtle-foreground sm:w-auto">
             <Link2Off className="size-4 shrink-0" aria-hidden="true" />
-            No application link available
+            Application link unavailable
           </p>
         )}
       </motion.div>

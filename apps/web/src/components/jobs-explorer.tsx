@@ -415,7 +415,19 @@ function JobsList({
     [filters],
   );
 
-  useJobSocket(handleNewJob);
+  /* An update to a job already in this list — typically background apply-link
+     discovery finishing. Replaced in place, and only when the job is on screen: an
+     update is not an arrival, so it must not change the list's length or ordering,
+     and a job that never passed the filters should not appear because it changed. */
+  const handleJobUpdated = useCallback((job: PublicJob) => {
+    setJobs((current) =>
+      current.some((existing) => existing.id === job.id)
+        ? current.map((existing) => (existing.id === job.id ? job : existing))
+        : current,
+    );
+  }, []);
+
+  useJobSocket(handleNewJob, handleJobUpdated);
 
   const shownTotal = total + liveAdded;
   const incompleteRange = isCustomRangeIncomplete(filters);

@@ -8,6 +8,7 @@ import { requireProfile, type ProfileRequest } from '../middleware/require-profi
 import {
   activeJobClauses,
   activeJobFilter,
+  dedicatedFeedSourceClauses,
   JobModel,
   type Job,
   type JobQueryFilter,
@@ -15,6 +16,7 @@ import {
 import { scoreJob } from '../recommendations/matching.js';
 import { normalizeMessage } from '../telegram/normalize.js';
 import { isPromotionalUrl } from '../telegram/text-safety.js';
+import { GITHUB_SOURCE } from '../github/sync.js';
 
 type JobFilter = JobQueryFilter;
 
@@ -145,6 +147,11 @@ export interface PublicJob {
   postedAt: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Whether the apply URL was verified by the universal discovery agent.
+   * true = verified with strong evidence, false = not verified or pending discovery.
+   */
+  applyUrlVerified: boolean;
 }
 
 export interface MongoJobDoc extends Job {
@@ -185,11 +192,20 @@ function resolveDescription(doc: MongoJobDoc): string {
  * unresolved link is left visible — it probably works, and hiding a working apply
  * button on a suspicion is its own kind of damage.
  */
-function resolveApplyUrl(applyUrl: string | null | undefined): string | null {
-  if (!applyUrl) return null;
-  if (isPromotionalUrl(applyUrl)) return null;
+export function resolvePublicApplyUrl(applyUrl: string | null | undefined): string | null {
+  if (!applyUrl || isPromotionalUrl(applyUrl)) return null;
 
-  return classifyApplyUrl(applyUrl).verdict === 'aggregator' ? null : applyUrl;
+  const classification = classifyApplyUrl(applyUrl);
+  if (classification.verdict === 'aggregator' || classification.verdict === 'unresolvable') {
+    return null;
+  }
+
+  // Keep the stored spelling and complete query string. The write path already
+  // normalizes new records, while legacy application URLs may use `ref`, `src` or
+  // another query parameter that is part of the employer's routing/tracking.
+  // Classification is still the guard that prevents malformed or aggregator
+  // values from becoming a public Apply button.
+  return applyUrl.trim();
 }
 
 const toIso = (value: Date | string): string =>
@@ -201,7 +217,7 @@ export function formatJob(doc: MongoJobDoc): PublicJob {
     company: doc.company ?? null,
     role: doc.role ?? null,
     batch: doc.batch ?? null,
-    applyUrl: resolveApplyUrl(doc.applyUrl),
+    applyUrl: resolvePublicApplyUrl(doc.applyUrl),
     location: doc.location ?? null,
     employmentType: doc.employmentType ?? null,
     companyLogoUrl: doc.companyLogoUrl?.trim() || null,
@@ -209,6 +225,7 @@ export function formatJob(doc: MongoJobDoc): PublicJob {
     postedAt: toIso(doc.postedAt),
     createdAt: toIso(doc.createdAt),
     updatedAt: toIso(doc.updatedAt),
+    applyUrlVerified: doc.applyUrlVerified ?? false,
   };
 }
 
@@ -259,6 +276,11 @@ jobsRouter.get('/', async (req: Request, res: Response) => {
 
   // Expiry first: whatever the caller asks for is narrowed to the live feed.
   const andClauses: JobFilter[] = activeJobClauses();
+
+  /* Global Internships have their own page and their own date filters. This is the
+     only cross-source rule in this route: every other source — Telegram,
+     api-import, whatever is added next — is a normal job and is listed here. */
+  andClauses.push(...dedicatedFeedSourceClauses([GITHUB_SOURCE]));
 
   // Search filter (company or role)
   if (typeof req.query['search'] === 'string') {
@@ -388,7 +410,12 @@ jobsRouter.get('/recommended', requireProfile, async (req: Request, res: Respons
     return;
   }
 
-  const docs = await JobModel.find(activeJobFilter())
+  const docs = await JobModel.find({
+    // Same population as the list feed: everything but the Global Internships,
+    // which have their own page. Recommendations must not show a job the user
+    // cannot find in /jobs, nor hide one that is listed there.
+    $and: [...activeJobClauses(), ...dedicatedFeedSourceClauses([GITHUB_SOURCE])],
+  })
     .sort({ postedAt: -1, _id: -1 })
     .limit(RECOMMENDATION_POOL_SIZE)
     .lean<MongoJobDoc[]>();

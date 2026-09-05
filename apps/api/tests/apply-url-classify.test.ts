@@ -240,6 +240,23 @@ describe('hostMatchesCompany', () => {
     expect(hostMatchesCompany('cognizant-careers.com', 'Cognizant Technology Solutions')).toBe(true);
   });
 
+  it('matches a multi-word name run together, hyphenated, or as one label', () => {
+    /* The most ordinary employer domain there is: a two-word company on one
+       registered label. Matching token-by-token alone missed it, which cost the
+       page its "official source" standing and so its verification. */
+    expect(hostMatchesCompany('careers.acmerobotics.com', 'Acme Robotics')).toBe(true);
+    expect(hostMatchesCompany('acme-robotics.com', 'Acme Robotics')).toBe(true);
+    expect(hostMatchesCompany('careers.acme.com', 'Acme Robotics')).toBe(true);
+  });
+
+  it('still compares whole labels, so a lookalike host does not match', () => {
+    // The company name appearing *inside* a label, or as someone else's
+    // subdomain, is how a lookalike would be dressed up.
+    expect(hostMatchesCompany('acmerobotics.evil.test', 'Acme Robotics')).toBe(false);
+    expect(hostMatchesCompany('notacmerobotics.com', 'Acme Robotics')).toBe(false);
+    expect(hostMatchesCompany('acmeroboticsxyz.com', 'Acme Robotics')).toBe(false);
+  });
+
   it('ignores generic tokens that would match almost any host', () => {
     // "Technologies"/"India" must not make `jobs.technologies-india.test` a match.
     expect(hostMatchesCompany('careers.acme.com', 'Global Technologies India Pvt Ltd')).toBe(false);

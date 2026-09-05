@@ -12,6 +12,7 @@ import { createApp } from '../src/app.js';
 import { signAuthToken } from '../src/lib/auth.js';
 import { ChannelModel } from '../src/models/channel.model.js';
 import { IngestQueueModel } from '../src/models/ingest-queue.model.js';
+import { ApplyDiscoveryQueueModel } from '../src/models/apply-discovery-queue.model.js';
 import { JobModel } from '../src/models/job.model.js';
 import { UserModel, type UserRole } from '../src/models/user.model.js';
 import { invalidateChannelStatusCache } from '../src/telegram/channel-registry.js';
@@ -90,6 +91,13 @@ const queueStatusRows = [
 
 const jobCountRows = [{ _id: 'internfreak', count: 7 }];
 
+/** Apply-link discovery queue, by status. */
+const discoveryStatusRows = [
+  { _id: 'pending', count: 2 },
+  { _id: 'completed', count: 5 },
+  { _id: 'not_found', count: 1 },
+];
+
 /** Wires up every collection read the admin routes perform. */
 function mockRegistryReads(docs: unknown[] = registryDocs): void {
   vi.spyOn(ChannelModel, 'find').mockReturnValue({
@@ -111,6 +119,13 @@ function mockRegistryReads(docs: unknown[] = registryDocs): void {
 
   vi.spyOn(IngestQueueModel, 'distinct').mockResolvedValue(['internfreak'] as never);
   vi.spyOn(JobModel, 'distinct').mockResolvedValue(['internfreak'] as never);
+
+  // The apply-discovery queue is reported next to the ingest queue, so /stats
+  // reads a second collection. Left unmocked, that read waits out Mongoose's
+  // buffering timeout instead of answering.
+  vi.spyOn(ApplyDiscoveryQueueModel, 'aggregate').mockReturnValue({
+    exec: vi.fn().mockResolvedValue(discoveryStatusRows),
+  } as never);
 }
 
 describe('admin API access control', () => {
@@ -286,8 +301,18 @@ describe('GET /api/admin/stats', () => {
     });
     expect(data.jobs).toEqual({ extracted: 7, inDatabase: 7 });
     expect(data.queue).toMatchObject({ pending: 1, completed: 10, failed: 1, total: 12 });
+    /* Reported separately from the ingest queue: a Telegram job is invisible until
+       its apply link verifies, so a stalled discovery queue and stalled ingestion
+       look identical from the dashboard unless both are shown. */
+    expect(data.applyDiscovery).toMatchObject({
+      pending: 2,
+      completed: 5,
+      not_found: 1,
+      total: 8,
+    });
     expect(data.lastMessageAt).toBe('2026-08-31T09:00:00.000Z');
     expect(typeof data.ingestion.queueWorkerEnabled).toBe('boolean');
+    expect(typeof data.ingestion.applyDiscoveryEnabled).toBe('boolean');
   });
 });
 

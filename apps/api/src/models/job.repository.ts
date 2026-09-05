@@ -35,6 +35,8 @@ export interface SaveJobInput {
   /** Candidates for the review queue, when the choice was not obvious. */
   applyUrlCandidates?: ApplyUrlCandidate[] | null;
   source: string;
+  /** Stable identity for sources that are not Telegram channels. */
+  sourceId?: string | null;
   telegramChannel: string;
   telegramChannelId: string | null;
   telegramMessageId: number;
@@ -149,6 +151,9 @@ export function resolveApplyUrlFields(
  * The single write path. A caller cannot opt out of classification, because the
  * apply fields are computed here from `input.applyUrl` rather than copied from it.
  *
+ * After creating the job, if the apply URL was not verified, this automatically
+ * triggers background discovery via the apply-discovery queue.
+ *
  * Throws whatever Mongoose throws — including the duplicate-key error the queue
  * worker already handles as success, which is deliberately not swallowed here.
  */
@@ -166,7 +171,7 @@ export async function saveJob(input: SaveJobInput): Promise<JobDocument> {
     );
   }
 
-  return JobModel.create({
+  const created = await JobModel.create({
     company: input.company,
     role: input.role,
     batch: input.batch,
@@ -177,12 +182,19 @@ export async function saveJob(input: SaveJobInput): Promise<JobDocument> {
     applyUrl: decision.applyUrl,
     applyUrlStatus: decision.applyUrlStatus,
     applyUrlCheckedAt: decision.applyUrlCheckedAt,
+    /* The UI gates the Apply button on this flag, not on `applyUrlStatus`. It has
+       to be set here as well: a link the classifier judged `direct` at ingest is
+       verified, and leaving it on the schema default of `false` hid the Apply
+       button on every correctly-ingested job. */
+    applyUrlVerified: decision.applyUrlStatus === 'verified',
+    applyUrlDiscoveryMethod: decision.applyUrlStatus === 'verified' ? 'direct_extraction' : null,
     sourceUrl: decision.sourceUrl,
     // A caller that already did the candidate work (the resolver) wins; otherwise
     // the classification's own single candidate is kept.
     applyUrlCandidates: input.applyUrlCandidates ?? decision.applyUrlCandidates,
 
     source: input.source,
+    sourceId: input.sourceId ?? undefined,
     telegramChannel: input.telegramChannel,
     telegramChannelId: input.telegramChannelId,
     telegramMessageId: input.telegramMessageId,
@@ -191,6 +203,52 @@ export async function saveJob(input: SaveJobInput): Promise<JobDocument> {
     cleanedText: input.cleanedText,
     postedAt: input.postedAt,
   });
+
+  // Trigger background apply URL discovery if not already verified.
+  // This runs async and never blocks the save path.
+  if (decision.applyUrlStatus !== 'verified') {
+    triggerApplyDiscovery(created, input, decision).catch((error: unknown) => {
+      // Log but never throw - discovery failure must not break job creation.
+      logger.error(`${ref} failed to enqueue apply discovery: ${errorText(error)}`);
+    });
+  }
+
+  return created;
+}
+
+/**
+ * Enqueues the job for background apply URL discovery.
+ *
+ * Fire-and-forget: errors are logged but never thrown, so discovery failure
+ * never breaks the job creation flow.
+ */
+async function triggerApplyDiscovery(
+  job: JobDocument,
+  input: SaveJobInput,
+  decision: ApplyUrlDecision,
+): Promise<void> {
+  const { env } = await import('../config/env.js');
+
+  // Skip if discovery is disabled.
+  if (!env.APPLY_DISCOVERY_ENABLED) return;
+
+  const { enqueueDiscoveryJob } = await import('../apply-discovery/queue.js');
+
+  await enqueueDiscoveryJob({
+    jobId: job._id.toString(),
+    company: input.company,
+    role: input.role,
+    location: input.location,
+    employmentType: input.employmentType,
+    batch: input.batch,
+    sourceUrl: decision.sourceUrl,
+    initialApplyUrl: input.applyUrl,
+    initialCandidates: input.applyUrlCandidates ?? decision.applyUrlCandidates,
+  });
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Fields the apply-link paths are allowed to write on an existing job. */
@@ -200,6 +258,12 @@ export interface UpdateApplyUrlFields {
   applyUrlCheckedAt?: Date | null;
   sourceUrl?: string | null;
   applyUrlCandidates?: ApplyUrlCandidate[] | null;
+  /** Whether the link was proven to be this posting's application. Gates the UI. */
+  applyUrlVerified?: boolean;
+  /** Which discovery stage produced the link. */
+  applyUrlDiscoveryMethod?: string | null;
+  /** The evidence behind `applyUrlVerified`, for the admin queue. */
+  applyUrlVerificationEvidence?: unknown;
 }
 
 /**

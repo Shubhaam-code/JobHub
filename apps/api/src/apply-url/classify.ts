@@ -129,7 +129,8 @@ const APPLY_PATH_REGEX =
   /\/(?:careers?|jobs?|job-?de\w+|apply|application|openings?|vacanc\w*|positions?|recruit\w*|forms?|viewform|hcmui|candidate|search)(?:[/\-_.?=]|$)/i;
 
 /** Official-body suffixes where the site's own page genuinely is the apply route. */
-const OFFICIAL_TLD_REGEX = /(?:^|\.)(?:gov|gov\.in|nic\.in|mil|ac\.in|edu|edu\.in|ac\.uk|res\.in)$/i;
+export const OFFICIAL_TLD_REGEX =
+  /(?:^|\.)(?:gov|gov\.in|nic\.in|mil|ac\.in|edu|edu\.in|ac\.uk|res\.in)$/i;
 
 /** Company-name tokens too generic to prove a host belongs to the employer. */
 const GENERIC_COMPANY_TOKENS = new Set([
@@ -260,7 +261,7 @@ export function normalizeApplyUrl(raw: string | null | undefined): string | null
 }
 
 /** True when some label of the host names a careers destination. */
-function hasCareerHost(host: string): boolean {
+export function hasCareerHost(host: string): boolean {
   return host.split('.').some((label) => CAREER_HOST_LABELS.has(label));
 }
 
@@ -274,14 +275,77 @@ function companyTokens(company: string | null | undefined): string[] {
     .filter((token) => token.length >= 3 && !GENERIC_COMPANY_TOKENS.has(token));
 }
 
-/** True when a host label plausibly names the posting's company. */
+/**
+ * Two-part public suffixes common in job postings, where the registered name is
+ * the third label from the end rather than the second.
+ *
+ * Not the full Public Suffix List, and it does not need to be: a suffix missing
+ * from here reads the suffix's own label as the registered name, which fails to
+ * match and so withholds the Apply button. Wrong in the safe direction.
+ */
+const MULTI_PART_SUFFIXES = new Set([
+  'co.in',
+  'co.uk',
+  'co.jp',
+  'co.kr',
+  'co.nz',
+  'co.za',
+  'com.au',
+  'com.br',
+  'com.mx',
+  'com.sg',
+  'ac.in',
+  'ac.uk',
+  'gov.in',
+  'org.uk',
+  'net.in',
+]);
+
+/** The registered label of a host: `acme` in `careers.acme.co.uk`. */
+function registrableLabel(host: string): string | null {
+  const labels = host.split('.');
+  if (labels.length < 2) return null;
+
+  const suffix = labels.slice(-2).join('.');
+  const index = MULTI_PART_SUFFIXES.has(suffix) ? labels.length - 3 : labels.length - 2;
+
+  return labels[index] ?? null;
+}
+
+/**
+ * True when the host's *registered* name plausibly names the posting's company.
+ *
+ * Two spellings of the name count, because employers use both: a single
+ * distinctive token (`careers.cognizant.com`) and the whole name run together
+ * (`careers.acmerobotics.com`). Matching token-by-token alone missed the second,
+ * which is the most ordinary employer domain there is — and with it every
+ * downstream check that requires an official source, so those postings lost their
+ * Apply button.
+ *
+ * Only the registered label is compared, never any label of the host. A subdomain
+ * is chosen by whoever owns the domain, so `acmerobotics.evil.test` would
+ * otherwise present itself as Acme Robotics' own careers site — and this function
+ * is what the validator treats as proof of an official source. Whole-label
+ * equality for the same reason: `notacmerobotics.com` is not Acme Robotics.
+ */
 export function hostMatchesCompany(host: string, company: string | null | undefined): boolean {
   const tokens = companyTokens(company);
   if (tokens.length === 0) return false;
 
-  const labels = host.split('.');
-  return tokens.some((token) =>
-    labels.some((label) => label === token || label.startsWith(`${token}-`) || label.endsWith(`-${token}`)),
+  const label = registrableLabel(host);
+  if (label === null) return false;
+
+  /* The collapsed form is only meaningful for a multi-word name; for one word it
+     is just the token again. */
+  const candidates = tokens.length > 1 ? [...tokens, tokens.join('')] : tokens;
+
+  return candidates.some(
+    (token) =>
+      label === token ||
+      label.startsWith(`${token}-`) ||
+      label.endsWith(`-${token}`) ||
+      // `acme-robotics.com` — the same name, hyphenated instead of run together.
+      (tokens.length > 1 && label.replace(/-/g, '') === token),
   );
 }
 

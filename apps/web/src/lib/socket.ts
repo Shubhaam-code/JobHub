@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { io, type Socket } from "socket.io-client";
 import { API_BASE_URL, type PublicJob } from "./api";
 
@@ -38,11 +38,53 @@ export function getSocket(): Socket {
 }
 
 /**
- * React hook to listen for real-time "job:new" Socket.IO events.
+ * The realtime channel a list subscribes to.
+ *
+ * `jobs` carries Telegram and every other normal source; `global-internships`
+ * carries the GitHub-backed feed. They are separate channels on the server for a
+ * reason: a `/jobs` list prepends whatever arrives, so a Global Internship sent on
+ * the `job:*` events appeared in a feed whose own query excludes that source.
+ * Subscribing to the wrong channel is the one way to reintroduce that, so a list
+ * names its feed and hears nothing else.
  */
-export function useJobSocket(onNewJob: (job: PublicJob) => void) {
+export type JobFeed = "jobs" | "global-internships";
+
+const EVENT_NAMES: Record<JobFeed, { created: string; updated: string }> = {
+  jobs: { created: "job:new", updated: "job:updated" },
+  "global-internships": {
+    created: "global-internship:new",
+    updated: "global-internship:updated",
+  },
+};
+
+/**
+ * Listens for realtime job events on one feed.
+ *
+ * `onNewJob` fires for a job that did not exist before. `onJobUpdated` fires when a
+ * job already on screen changed — in practice, when background apply-link discovery
+ * finishes and the card's Apply button should switch from unavailable to live. The
+ * two are separate callbacks because the correct response differs: prepend versus
+ * replace in place. Handling an update as a new job would duplicate the card.
+ *
+ * `onJobUpdated` is optional, so an existing caller that only cares about arrivals
+ * needs no change. `feed` defaults to `jobs`, which is what every existing caller
+ * wants.
+ */
+export function useJobSocket(
+  onNewJob: (job: PublicJob) => void,
+  onJobUpdated?: (job: PublicJob) => void,
+  feed: JobFeed = "jobs",
+) {
+  /* Kept in a ref so a caller passing an inline arrow does not tear the socket
+     listener down and rebuild it on every render. `onNewJob` is already in the
+     dependency list below for backward compatibility; this keeps the optional
+     second callback from adding another reason to resubscribe. */
+  const updatedRef = useRef(onJobUpdated);
+  updatedRef.current = onJobUpdated;
+
   useEffect(() => {
     const socket = getSocket();
+    const events = EVENT_NAMES[feed];
 
     const handleJobNew = (job: PublicJob) => {
       if (job && typeof job === "object" && job.id) {
@@ -50,10 +92,18 @@ export function useJobSocket(onNewJob: (job: PublicJob) => void) {
       }
     };
 
-    socket.on("job:new", handleJobNew);
+    const handleJobUpdated = (job: PublicJob) => {
+      if (job && typeof job === "object" && job.id) {
+        updatedRef.current?.(job);
+      }
+    };
+
+    socket.on(events.created, handleJobNew);
+    socket.on(events.updated, handleJobUpdated);
 
     return () => {
-      socket.off("job:new", handleJobNew);
+      socket.off(events.created, handleJobNew);
+      socket.off(events.updated, handleJobUpdated);
     };
-  }, [onNewJob]);
+  }, [onNewJob, feed]);
 }

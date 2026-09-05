@@ -107,8 +107,19 @@ export function OpportunityExplorer() {
     [debouncedQuery, tab],
   );
 
+  /* An existing job changed — usually background apply-link discovery finishing,
+     which flips the card's Apply button from unavailable to live. Replaced in place
+     so the list's length, ordering and pagination total all stay as they were. */
+  const handleJobUpdated = useCallback((updated: PublicJob) => {
+    setJobs((prev) =>
+      prev.some((existing) => existing.id === updated.id)
+        ? prev.map((existing) => (existing.id === updated.id ? updated : existing))
+        : prev,
+    );
+  }, []);
+
   /* Realtime Socket.IO listener */
-  useJobSocket(handleNewJob);
+  useJobSocket(handleNewJob, handleJobUpdated);
 
   /* Debounce search input */
   useEffect(() => {

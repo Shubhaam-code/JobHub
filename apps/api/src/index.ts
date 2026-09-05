@@ -14,13 +14,21 @@ import {
 import { closeSocketServer, initSocketServer } from './lib/socket.js';
 import { recoverStaleClaims } from './queue/ingest-queue.js';
 import { startQueueWorker, type QueueWorker } from './queue/worker.js';
+import { recoverStaleDiscoveryClaims } from './apply-discovery/queue.js';
+import {
+  startApplyDiscoveryWorker,
+  type ApplyDiscoveryWorker,
+} from './apply-discovery/worker.js';
 import { warmPdfParser } from './resume/pdf-text.js';
+import { startGithubSyncScheduler, type GithubSyncScheduler } from './github/sync.js';
 import { ensureConfiguredChannels } from './telegram/channel-registry.js';
 import { createTelegramClient } from './telegram/client.js';
 import { startListener, type ListenerHandle } from './telegram/listener.js';
 
 let telegramListener: ListenerHandle | null = null;
 let queueWorker: QueueWorker | null = null;
+let applyDiscoveryWorker: ApplyDiscoveryWorker | null = null;
+let githubSyncScheduler: GithubSyncScheduler | null = null;
 let shuttingDown = false;
 
 /** Hard ceiling on the whole teardown; past it the process is killed outright. */
@@ -84,9 +92,23 @@ async function shutdown(server: HttpServer, signal: string): Promise<void> {
     await withTimeout('queue worker stop', STEP_TIMEOUT_MS, queueWorker.stop());
   }
 
+  // Same reasoning as the queue worker: an in-flight discovery holds a fetch and
+  // a claimed row. Stopping before the database closes lets it finish its write;
+  // a hard kill leaves the row `processing` for recoverStaleDiscoveryClaims().
+  if (applyDiscoveryWorker) {
+    await withTimeout(
+      'apply-discovery worker stop',
+      STEP_TIMEOUT_MS,
+      applyDiscoveryWorker.stop(),
+    );
+  }
+
   if (telegramListener) {
     await withTimeout('Telegram listener stop', STEP_TIMEOUT_MS, telegramListener.stop());
   }
+
+  githubSyncScheduler?.stop();
+  githubSyncScheduler = null;
 
   await withTimeout('MongoDB disconnect', STEP_TIMEOUT_MS, disconnectDatabase());
 
@@ -207,6 +229,11 @@ async function main(): Promise<void> {
      lib/memory-reporter.ts for what it does and does not record. */
   startMemoryReporter(env.MEMORY_REPORT_INTERVAL_MS);
 
+  // GitHub is an additional source feeding the same jobs collection. The
+  // scheduler performs one sync immediately, then refreshes once per day by
+  // default, without affecting the existing Telegram listener or queue worker.
+  githubSyncScheduler = startGithubSyncScheduler();
+
   // Registered before the Telegram startup below: resolving channels and running
   // the 7-day backfill can take a while, and Ctrl+C during it must still shut the
   // HTTP server, Socket.IO and MongoDB down cleanly.
@@ -262,6 +289,33 @@ async function main(): Promise<void> {
     logger.warn(
       '[startup] QUEUE_WORKER_ENABLED=false — messages will queue up but nothing will classify ' +
         'them in this process.',
+    );
+  }
+
+  // ── Apply-link discovery worker ───────────────────────────────────────────
+  //
+  // A second, independent queue. Its rows are enqueued by saveJob() whenever a
+  // posting arrives without a link we can verify, and by the GitHub sync and the
+  // jobs:discover-apply-urls backfill. Kept separate from the ingest worker on
+  // purpose: discovery does slow network work (page fetches, Firecrawl, search)
+  // and must never sit in front of classification.
+  if (env.APPLY_DISCOVERY_ENABLED) {
+    try {
+      const recovered = await recoverStaleDiscoveryClaims();
+      if (recovered > 0) {
+        logger.warn(
+          `[startup] Recovered ${recovered} stale apply-discovery claim(s) from a previous run.`,
+        );
+      }
+    } catch (error: unknown) {
+      logger.warn('[startup] Could not recover stale apply-discovery claims', error);
+    }
+
+    applyDiscoveryWorker = startApplyDiscoveryWorker();
+  } else {
+    logger.warn(
+      '[startup] APPLY_DISCOVERY_ENABLED=false — jobs without a verified apply link will stay ' +
+        'that way in this process.',
     );
   }
 

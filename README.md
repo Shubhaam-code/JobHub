@@ -218,6 +218,14 @@ API without a local `mongod`. `/health` reports the real connection state and `/
 returns `503` while it is down. Add a readiness gate in front of anything that needs the
 database.
 
+```bash
+npm run github:sync --workspace @jia/api
+```
+
+Imports the `Chieler/Summer-2027-SWE-Internships` README into the existing `jobs` collection.
+The API also runs this sync once at startup and every 24 hours while it is running. GitHub rows
+use the same cards, filters, details page, Apply Now guard and logo resolver as Telegram rows.
+
 ## Environment variables
 
 **`apps/api/.env`**
@@ -233,6 +241,10 @@ database.
 | `TELEGRAM_API_HASH`           | _(unset)_                                  | 32-char api_hash from my.telegram.org    |
 | `TELEGRAM_SESSION`            | _(unset)_                                  | Secret. From `npm run telegram:login`    |
 | `TELEGRAM_CHANNELS`           | `jobs_and_internships_updates`             | Comma-separated public channel usernames |
+| `GITHUB_JOBS_SYNC_ENABLED`    | `true`                                     | Enable the README source sync             |
+| `GITHUB_JOBS_REPOSITORY_URL`  | _(repository README)_                      | Raw Markdown README endpoint              |
+| `GITHUB_JOBS_SYNC_INTERVAL_MS`| `86400000`                                 | Refresh interval (minimum 1 hour)        |
+| `GITHUB_JOBS_SYNC_TIMEOUT_MS` | `20000`                                    | GitHub request timeout                    |
 | `GEMINI_API_KEY`              | _(unset)_                                  | Secret. From aistudio.google.com/apikey  |
 | `GEMINI_MODEL`                | `gemini-3.7-flash`                         | Model used for classification            |
 | `GROQ_API_KEY`                | _(unset)_                                  | Secret. From console.groq.com/keys       |
@@ -316,6 +328,12 @@ The two Clerk keys are optional in development and mandatory for a production bu
   `typescript >=4.8.4 <6.1.0`.
 
 ## How ingestion works
+
+The GitHub README source is independent of Telegram classification: its Markdown tables are
+parsed directly, direct application URLs are passed through the same apply-link classifier, and
+rows are upserted by a deterministic `sourceId`. A successful refresh marks removed or older-than-
+15-day GitHub rows `expired` while retaining them for history. Public queries always apply the
+source `postedAt` cutoff, so importing an old row today cannot make it active.
 
 On startup, when Telegram credentials are present, the API resolves each channel in
 `TELEGRAM_CHANNELS`, registers the live `NewMessage` handler, and only then backfills. Both

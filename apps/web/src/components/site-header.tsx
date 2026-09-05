@@ -17,6 +17,7 @@ import { DURATION, EASE_IN, EASE_OUT } from "@/lib/motion";
 const NAV_LINKS = [
   { label: "Home", href: "/" },
   { label: "Jobs", href: "/jobs" },
+  { label: "Global Internships", href: "/global-internships" },
   { label: "Recommended", href: "/recommended-jobs" },
   { label: "Dashboard", href: "/dashboard" },
 ];

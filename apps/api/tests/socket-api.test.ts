@@ -4,7 +4,12 @@ import { io as ioc, type Socket as ClientSocket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
-import { broadcastNewJob, closeSocketServer, initSocketServer } from '../src/lib/socket.js';
+import {
+  broadcastNewJob,
+  broadcastUpdatedJob,
+  closeSocketServer,
+  initSocketServer,
+} from '../src/lib/socket.js';
 import type { PublicJob } from '../src/routes/jobs.route.js';
 
 describe('Socket.IO realtime updates', () => {
@@ -25,6 +30,7 @@ describe('Socket.IO realtime updates', () => {
     postedAt: '2026-08-31T10:00:00.000Z',
     createdAt: '2026-08-31T10:00:05.000Z',
     updatedAt: '2026-08-31T10:00:05.000Z',
+    applyUrlVerified: true,
   };
 
   beforeAll(async () => {
@@ -93,5 +99,61 @@ describe('Socket.IO realtime updates', () => {
     ]) {
       expect(received[field]).toBeUndefined();
     }
+  });
+
+  /* ── Feed separation ──────────────────────────────────────────────────────
+     Global Internships have their own page, and the `/jobs` listeners prepend
+     whatever arrives on `job:new` without looking at `source`. So the exclusion
+     that the list query enforces with `$nin` has to hold here too, and the only
+     way it can is by never emitting a Global Internship on the `/jobs` channel.
+     These assert that both directions stay silent on the other's events — put a
+     GitHub broadcast back on `job:new` and test 5 fails. */
+
+  it('4. sends a global internship only on global-internship:new, never on job:new', async () => {
+    const jobsFeed: PublicJob[] = [];
+    const onJobNew = (job: PublicJob) => jobsFeed.push(job);
+    clientSocket.on('job:new', onJobNew);
+
+    const received = await new Promise<PublicJob>((resolve) => {
+      clientSocket.once('global-internship:new', (job: PublicJob) => resolve(job));
+      broadcastNewJob(mockPublicJob, 'global-internships');
+    });
+
+    clientSocket.off('job:new', onJobNew);
+
+    expect(received.id).toBe(mockPublicJob.id);
+    expect(jobsFeed).toHaveLength(0);
+  });
+
+  it('5. sends a normal job only on job:new, never on the global internships channel', async () => {
+    const globalFeed: PublicJob[] = [];
+    const onGlobalNew = (job: PublicJob) => globalFeed.push(job);
+    clientSocket.on('global-internship:new', onGlobalNew);
+
+    const received = await new Promise<PublicJob>((resolve) => {
+      clientSocket.once('job:new', (job: PublicJob) => resolve(job));
+      broadcastNewJob(mockPublicJob);
+    });
+
+    clientSocket.off('global-internship:new', onGlobalNew);
+
+    expect(received.id).toBe(mockPublicJob.id);
+    expect(globalFeed).toHaveLength(0);
+  });
+
+  it('6. separates the update events by feed as well', async () => {
+    const jobsFeed: PublicJob[] = [];
+    const onJobUpdated = (job: PublicJob) => jobsFeed.push(job);
+    clientSocket.on('job:updated', onJobUpdated);
+
+    const received = await new Promise<PublicJob>((resolve) => {
+      clientSocket.once('global-internship:updated', (job: PublicJob) => resolve(job));
+      broadcastUpdatedJob(mockPublicJob, 'global-internships');
+    });
+
+    clientSocket.off('job:updated', onJobUpdated);
+
+    expect(received.id).toBe(mockPublicJob.id);
+    expect(jobsFeed).toHaveLength(0);
   });
 });

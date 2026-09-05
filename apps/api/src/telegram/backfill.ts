@@ -33,6 +33,11 @@ const SECONDS_PER_DAY = 24 * 60 * 60;
  * is the real stop condition; this only bounds a pathological channel (or a
  * skewed clock) and is logged loudly when it triggers. It is also handed to
  * GramJS, which otherwise treats an absent limit as "the entire channel".
+ *
+ * Overridable per run (`maxMessages`) because the ceiling has to scale with the
+ * window: a 14-day recovery on a busy channel can exceed what 7 days needed, and
+ * hitting this before the cutoff means part of the window is silently missing.
+ * `truncated` in the summary is what reports that.
  */
 export const MAX_MESSAGES_WALKED = 1_000;
 
@@ -69,6 +74,8 @@ export interface BackfillOptions {
   channelId?: string | null;
   /** Window size in days. Defaults to BACKFILL_WINDOW_DAYS. */
   windowDays?: number;
+  /** Walk ceiling for this run. Defaults to MAX_MESSAGES_WALKED. */
+  maxMessages?: number;
   /** Reference clock in ms; the cutoff derives from it. Injected by tests. */
   now?: number;
   /** Ingestion entry point. Overridden only in tests. */
@@ -114,6 +121,7 @@ function toHistoryMessage(raw: unknown): HistoryMessage | null {
  */
 export async function runBackfill(options: BackfillOptions): Promise<BackfillSummary> {
   const windowDays = options.windowDays ?? BACKFILL_WINDOW_DAYS;
+  const maxMessages = options.maxMessages ?? MAX_MESSAGES_WALKED;
   const ingest = options.ingest ?? ingestMessage;
 
   // The cutoff is computed once, when the backfill starts.
@@ -141,11 +149,11 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillSum
   let reachedCutoff = false;
 
   try {
-    // The date cutoff below is what normally ends the walk; MAX_MESSAGES_WALKED
-    // is only a backstop, since GramJS reads the whole channel when `limit` is
-    // absent. Either way only the recent chunks of history are requested.
+    // The date cutoff below is what normally ends the walk; the ceiling is only a
+    // backstop, since GramJS reads the whole channel when `limit` is absent.
+    // Either way only the recent chunks of history are requested.
     for await (const raw of options.client.iterMessages(options.entity, {
-      limit: MAX_MESSAGES_WALKED,
+      limit: maxMessages,
     })) {
       summary.fetched += 1;
 
@@ -182,10 +190,10 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillSum
   }
 
   // Hitting the ceiling before the cutoff means part of the window was missed.
-  if (!reachedCutoff && summary.fetched >= MAX_MESSAGES_WALKED) {
+  if (!reachedCutoff && summary.fetched >= maxMessages) {
     summary.truncated = true;
     logger.warn(
-      `[backfill] Stopped after ${MAX_MESSAGES_WALKED} messages without reaching the ` +
+      `[backfill] Stopped after ${maxMessages} messages without reaching the ` +
         `${windowDays}-day cutoff — older posts inside the window were NOT imported.`,
     );
   }

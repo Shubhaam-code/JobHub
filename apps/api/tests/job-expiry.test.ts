@@ -72,6 +72,11 @@ function stored(fields: {
     ...BASE,
     _id: new mongoose.Types.ObjectId(),
     company: fields.company,
+    /* These fixtures exist to test the expiry window, so they have to clear the
+       other visibility rule: a Telegram row is only public once its apply link has
+       been proven to be the posting's own. Leaving it unset would hide every
+       fixture and make each case pass or fail for the wrong reason. */
+    applyUrlVerified: true,
     telegramMessageId: nextMessageId,
     postedAt: fields.createdAt,
     createdAt: fields.createdAt,

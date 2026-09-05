@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { jobsRouter } from './jobs.route.js';
+import { globalInternshipsRouter } from './global-internships.route.js';
 import { profileRouter } from './profile.route.js';
 
 export const API_VERSION = 'v1';
@@ -8,6 +9,7 @@ export const API_VERSION = 'v1';
 export const apiRouter = Router();
 
 apiRouter.use('/jobs', jobsRouter);
+apiRouter.use('/global-internships', globalInternshipsRouter);
 apiRouter.use('/profile', profileRouter);
 
 /**
@@ -23,6 +25,8 @@ apiRouter.get('/', (_req, res) => {
     endpoints: [
       'GET /health',
       'GET /health/ready',
+      `GET /api/${API_VERSION}/global-internships`,
+      `GET /api/${API_VERSION}/global-internships/:id`,
       'POST /api/auth/login',
       'GET /api/auth/me',
       `GET /api/${API_VERSION}`,

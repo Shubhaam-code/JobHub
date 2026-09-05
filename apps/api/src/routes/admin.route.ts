@@ -18,6 +18,7 @@ import { env } from '../config/env.js';
 import { badRequest, notFound } from '../lib/http-error.js';
 import { requireAdmin } from '../middleware/require-auth.js';
 import { getQueueCounts } from '../queue/ingest-queue.js';
+import { getDiscoveryQueueCounts } from '../apply-discovery/queue.js';
 import {
   CHANNEL_STATUSES,
   listChannelsWithStats,
@@ -61,7 +62,11 @@ const sumBy = (channels: ChannelReport[], pick: (channel: ChannelReport) => numb
  * views can never disagree.
  */
 adminRouter.get('/stats', async (_req: Request, res: Response) => {
-  const [channels, queue] = await Promise.all([listChannelsWithStats(), getQueueCounts()]);
+  const [channels, queue, applyDiscovery] = await Promise.all([
+    listChannelsWithStats(),
+    getQueueCounts(),
+    getDiscoveryQueueCounts(),
+  ]);
 
   res.status(200).json({
     data: {
@@ -82,6 +87,11 @@ adminRouter.get('/stats', async (_req: Request, res: Response) => {
         inDatabase: sumBy(channels, (channel) => channel.jobsInDatabase),
       },
       queue,
+      /* A Telegram job stays out of the public feed until its apply link is
+         verified, so a backed-up discovery queue looks exactly like "ingestion
+         stopped" from the dashboard. Reported alongside the ingest queue so the
+         difference is visible. */
+      applyDiscovery,
       lastMessageAt: latest(channels.map((channel) => channel.lastMessageAt)),
       lastSyncAt: latest(channels.map((channel) => channel.lastSyncAt)),
       ingestion: {
@@ -90,6 +100,8 @@ adminRouter.get('/stats', async (_req: Request, res: Response) => {
         ),
         llmConfigured: Boolean(env.GEMINI_API_KEY),
         queueWorkerEnabled: env.QUEUE_WORKER_ENABLED,
+        applyDiscoveryEnabled: env.APPLY_DISCOVERY_ENABLED,
+        firecrawlConfigured: Boolean(env.FIRECRAWL_API_KEY),
       },
     },
   });

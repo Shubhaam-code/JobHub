@@ -5,18 +5,18 @@ import Link from "next/link";
 import { AlertCircle, ArrowRight, Building2, RefreshCw } from "lucide-react";
 
 import { JobSearchForm } from "@/components/job-search-form";
+import { CompanyLogo } from "@/components/company-logo";
 import { OpportunityCard } from "@/components/opportunity-card";
 import { fetchJobs, type PublicJob } from "@/lib/api";
-import { popularSearchTerms, topCompanies } from "@/lib/job-highlights";
+import { companyLogoJob, popularSearchTerms, topCompanies } from "@/lib/job-highlights";
 import { useJobSocket } from "@/lib/socket";
 
 /**
  * How many postings the homepage reads.
  *
- * One request serves all three sections: the newest few as cards, and the whole
- * sample as the population the company row and the popular searches are counted
- * over. A wider sample makes those two rows more representative, so this sits at
- * the API's own per-page ceiling rather than at the card count.
+ * The first request serves the newest cards immediately. Additional active pages
+ * are loaded in the background so company counts and popular searches eventually
+ * cover the full live feed while the first viewport remains responsive.
  */
 const SAMPLE_SIZE = 100;
 
@@ -73,13 +73,47 @@ export function HomeLanding() {
     let live = true;
 
     fetchJobs({ page: 1, limit: SAMPLE_SIZE, sort: "newest" }, controller.signal)
-      .then((response) => {
+      .then(async (response) => {
         if (!live) return;
         setJobs(response.data);
         setTotal(response.pagination.total);
         setLatestJobs(response.data.slice(0, LATEST_COUNT));
         setTotalPages(Math.max(1, response.pagination.totalPages));
         setStatus("ready");
+
+        // The public API caps one page at 100 rows. Load the remaining active
+        // pages in the background so company counts cover the whole live feed,
+        // not only the newest sample, while the first viewport stays responsive.
+        if (response.pagination.totalPages <= 1) return;
+
+        const pages = Array.from(
+          { length: response.pagination.totalPages - 1 },
+          (_unused, index) => index + 2,
+        );
+        let remaining: Awaited<ReturnType<typeof fetchJobs>>[];
+        try {
+          remaining = await Promise.all(
+            pages.map((pageNumber) =>
+              fetchJobs({ page: pageNumber, limit: SAMPLE_SIZE, sort: "newest" }, controller.signal),
+            ),
+          );
+        } catch (error: unknown) {
+          // The first page is already usable. A later-page outage should not
+          // replace the working homepage with an error state.
+          if (controller.signal.aborted) throw error;
+          return;
+        }
+        if (!live) return;
+
+        const allJobs = [response.data, ...remaining.map((page) => page.data)].flat();
+        setJobs((current) => {
+          const fetchedIds = new Set(allJobs.map((job) => job.id));
+          // Preserve jobs received through Socket.IO while the background pages
+          // were loading. They are newer than this HTTP snapshot and must not be
+          // lost when the page responses settle.
+          const liveOnly = current.filter((job) => !fetchedIds.has(job.id));
+          return [...liveOnly, ...allJobs];
+        });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || !live) return;
@@ -133,7 +167,19 @@ export function HomeLanding() {
     if (page === 1) setLatestJobs((current) => [job, ...current].slice(0, LATEST_COUNT));
   }, [page]);
 
-  useJobSocket(handleNewJob);
+  /* An existing job changed — in practice, background apply-link discovery
+     finished and the card's Apply button should go live. Replaced in place rather
+     than prepended: the job is already on screen and its position is unchanged. */
+  const handleJobUpdated = useCallback((job: PublicJob) => {
+    const swap = (current: PublicJob[]) =>
+      current.some((existing) => existing.id === job.id)
+        ? current.map((existing) => (existing.id === job.id ? job : existing))
+        : current;
+    setJobs(swap);
+    setLatestJobs(swap);
+  }, []);
+
+  useJobSocket(handleNewJob, handleJobUpdated);
 
   const companies = useMemo(() => topCompanies(jobs, COMPANY_COUNT), [jobs]);
   const terms = useMemo(() => popularSearchTerms(jobs, TERM_COUNT), [jobs]);
@@ -231,32 +277,40 @@ export function HomeLanding() {
                 </p>
               ) : (
                 <ul className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {companies.map((company) => (
-                    <li key={company.name}>
-                      <Link
-                        href={`/jobs?q=${encodeURIComponent(company.name)}`}
-                        className="flex min-h-16 items-center gap-3 rounded-lg border border-border bg-background px-3.5 py-3 transition-[border-color,box-shadow] duration-150 hover:border-primary/40 hover:shadow-e1"
-                      >
-                        {/* A monogram, not a logo: nothing in the feed carries a
-                            company mark, and fetching one from a guessed domain
-                            would attribute a brand we cannot verify. */}
-                        <span
-                          aria-hidden="true"
-                          className="grid size-10 shrink-0 place-items-center rounded-md bg-primary-soft font-heading text-sm leading-none font-semibold text-primary-strong"
+                  {companies.map((company) => {
+                    const logoJob = companyLogoJob(jobs, company.name);
+
+                    return (
+                      <li key={company.name}>
+                        <Link
+                          href={`/jobs?q=${encodeURIComponent(company.name)}`}
+                          className="flex min-h-16 items-center gap-3 rounded-lg border border-border bg-background px-3.5 py-3 transition-[border-color,box-shadow] duration-150 hover:border-primary/40 hover:shadow-e1"
                         >
-                          {company.name.charAt(0).toUpperCase()}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold text-foreground">
-                            {company.name}
+                          {logoJob ? (
+                            <CompanyLogo
+                              job={logoJob}
+                              className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md bg-primary-soft font-heading text-sm leading-none font-semibold text-primary-strong"
+                            />
+                          ) : (
+                            <span
+                              aria-hidden="true"
+                              className="grid size-10 shrink-0 place-items-center rounded-md bg-primary-soft font-heading text-sm leading-none font-semibold text-primary-strong"
+                            >
+                              {company.name.charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-foreground">
+                              {company.name}
+                            </span>
+                            <span className="block text-xs text-subtle-foreground tabular-nums">
+                              {company.count} {company.count === 1 ? "opening" : "openings"}
+                            </span>
                           </span>
-                          <span className="block text-xs text-subtle-foreground tabular-nums">
-                            {company.count} {company.count === 1 ? "opening" : "openings"}
-                          </span>
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

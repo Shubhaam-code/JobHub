@@ -21,8 +21,14 @@ const TYPE_ICONS = {
 } as const;
 
 /** The grid card, used on the homepage and anywhere jobs are shown as tiles. */
-export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
-  const { batch, applyUrl, postedAt } = opportunity;
+export function OpportunityCard({
+  opportunity,
+  detailHref,
+}: {
+  opportunity: PublicJob;
+  detailHref?: string;
+}) {
+  const { batch, applyUrl, applyUrlVerified, postedAt } = opportunity;
 
   const company = displayCompany(opportunity);
   const role = displayRole(opportunity);
@@ -34,6 +40,10 @@ export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
   // An applyUrl is normally an http(s) link, but a stored email becomes mailto:
   // and anything with an unusable scheme is treated as absent.
   const applyLink = resolveLink(applyUrl);
+  const detailsHref = detailHref ?? '/jobs/' + opportunity.id;
+
+  // Show apply button only when URL exists AND is verified
+  const showApplyButton = applyLink && applyUrlVerified;
 
   return (
     <article className="group relative flex h-full flex-col rounded-lg border border-border bg-surface p-5 shadow-e1 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-e2 focus-within:border-primary">
@@ -62,7 +72,7 @@ export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
           readable. */}
       <h3 className="mt-4 line-clamp-2 text-lg leading-snug font-semibold tracking-snug text-balance text-foreground lg:text-xl">
         <Link
-          href={`/jobs/${opportunity.id}`}
+          href={detailsHref}
           className="rounded-sm before:absolute before:inset-0 before:rounded-lg before:content-['']"
         >
           {role}
@@ -95,10 +105,10 @@ export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
           the full width rather than leaving a gap where a button should be. */}
       <div
         className={`relative z-10 mt-auto grid gap-2 border-t border-border pt-4 ${
-          applyLink ? "grid-cols-2" : "grid-cols-1"
+          showApplyButton ? "grid-cols-2" : "grid-cols-1"
         }`}
       >
-        {applyLink ? (
+        {showApplyButton ? (
           <a
             href={applyLink.href}
             {...(applyLink.kind === "email"
@@ -117,10 +127,17 @@ export function OpportunityCard({ opportunity }: { opportunity: PublicJob }) {
               aria-hidden="true"
             />
           </a>
+        ) : applyLink ? (
+          <div
+            className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-border bg-muted px-4 text-sm font-medium text-muted-foreground pointer-fine:min-h-10"
+            title="Apply link verification in progress"
+          >
+            Apply link not available
+          </div>
         ) : null}
 
         <Link
-          href={`/jobs/${opportunity.id}`}
+          href={detailsHref}
           aria-label={`View details for ${role} at ${company}`}
           className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-muted-foreground transition-[background-color,border-color,color] duration-150 hover:border-border-strong hover:bg-muted hover:text-foreground active:scale-[0.98] pointer-fine:min-h-10"
         >

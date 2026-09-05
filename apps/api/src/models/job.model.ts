@@ -16,6 +16,16 @@ export const JOB_ACTIVE_WINDOW_DAYS = 21;
 export const JOB_ACTIVE_WINDOW_MS = JOB_ACTIVE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 /**
+ * Public-feed window measured from the source's posted date.
+ *
+ * `JOB_ACTIVE_WINDOW_DAYS` remains the legacy lifecycle/expiry value used by
+ * existing records and admin tooling. Public visibility is stricter and is
+ * based on `postedAt`, never on when the document happened to be imported.
+ */
+export const JOB_SOURCE_ACTIVE_WINDOW_DAYS = 15;
+export const JOB_SOURCE_ACTIVE_WINDOW_MS = JOB_SOURCE_ACTIVE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/**
  * Lifecycle states.
  *
  * `expired` and `closed` both hide a listing immediately, whatever its
@@ -87,8 +97,28 @@ const jobSchema = new Schema(
      */
     applyUrlCandidates: { type: Schema.Types.Mixed, default: null },
 
+    // ── Universal Apply Discovery ─────────────────────────────────────────
+    /**
+     * Whether the apply URL was verified by the universal discovery agent.
+     * true = verified with strong evidence, false = not verified or pending.
+     */
+    applyUrlVerified: { type: Boolean, default: false },
+    /**
+     * Discovery method used to find the apply URL.
+     * One of: direct_extraction, firecrawl_scrape, web_search, company_search, none
+     */
+    applyUrlDiscoveryMethod: { type: String, default: null },
+    /**
+     * Evidence collected during URL validation.
+     * Contains: companyMatch, roleMatch, locationMatch, hasApplicationAction,
+     * isOfficialSource, overallConfidence, and detailed signals.
+     */
+    applyUrlVerificationEvidence: { type: Schema.Types.Mixed, default: null },
+
     // ── Provenance ────────────────────────────────────────────────────────
     source: { type: String, required: true, trim: true },
+    /** Stable identity supplied by non-Telegram sources (for example GitHub). */
+    sourceId: { type: String, trim: true, default: undefined },
     telegramChannel: { type: String, required: true, trim: true },
     /** Numeric Telegram channel ID as a string. Survives a username change. */
     telegramChannelId: { type: String, default: null },
@@ -110,6 +140,12 @@ const jobSchema = new Schema(
      * user-facing filter reads as active.
      */
     status: { type: String, enum: JOB_STATUSES, default: JOB_STATUS_ACTIVE },
+    /**
+     * GitHub feed visibility is kept separately from the legacy lifecycle status.
+     * This lets the dedicated feed use its source-date window without changing
+     * the existing Jobs route's lifecycle contract.
+     */
+    githubFeedActive: { type: Boolean, default: null },
     /**
      * When the listing stops being shown — `createdAt + 21 days`, filled in by
      * the hook below. Defaults to null rather than a date so an explicitly
@@ -178,10 +214,17 @@ jobSchema.path('applyUrl').validate({
 
 // Deduplication: same channel + message ID must never be stored twice.
 jobSchema.index({ telegramChannel: 1, telegramMessageId: 1 }, { unique: true });
+// Non-Telegram sources can upsert by their own deterministic identity. The
+// partial index leaves legacy Telegram documents (which have no sourceId) alone.
+jobSchema.index(
+  { source: 1, sourceId: 1 },
+  { unique: true, partialFilterExpression: { sourceId: { $type: 'string' } } },
+);
 // Query by recency.
 jobSchema.index({ postedAt: -1 });
 // Every user-facing query starts by narrowing to the listings still on show.
 jobSchema.index({ status: 1, expiresAt: -1 });
+jobSchema.index({ source: 1, githubFeedActive: 1, postedAt: -1 });
 // The admin review queue reads by status, oldest-checked first.
 jobSchema.index({ applyUrlStatus: 1, applyUrlCheckedAt: 1 });
 
@@ -190,16 +233,26 @@ export const JobModel = model<Job>('Job', jobSchema);
 /**
  * The clauses that decide whether a listing is visible to a user.
  *
- * A job shows up only while it is `active` and its `expiresAt` is still in the
- * future. Both halves tolerate a document stored before those fields existed:
+ * A job shows up only while it is `active`, its optional source deadline has not
+ * passed, and its source `postedAt` is within the 15-day public-feed window.
+ * Both lifecycle halves tolerate a document stored before those fields existed:
  * in MongoDB a `null` match also matches a missing field, so a legacy row counts
- * as active and has its 21-day window measured from `createdAt` instead — the
- * same rule, applied to the data that row does have.
+ * as active when its stored source date is inside that same 15-day window.
+ *
+ * Apply-link verification is deliberately *not* one of these clauses. A listing is
+ * worth showing on its own merits — company, role, batch, description — and
+ * `applyUrlVerified` only decides whether the card can offer an Apply button.
+ * Gating visibility on it hid whole postings while background discovery was still
+ * pending, which is a far worse outcome than a card whose Apply button is not
+ * live yet.
  *
  * Returned as separate clauses so a route can add its own filters alongside them
  * without either side clobbering the other's `$or`.
  */
 export function activeJobClauses(now: Date = new Date()): JobQueryFilter[] {
+  const utcToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const sourceCutoff = new Date(utcToday.getTime() - JOB_SOURCE_ACTIVE_WINDOW_MS);
+
   return [
     { $or: [{ status: JOB_STATUS_ACTIVE }, { status: null }] },
     {
@@ -207,11 +260,24 @@ export function activeJobClauses(now: Date = new Date()): JobQueryFilter[] {
         { expiresAt: { $gt: now } },
         {
           expiresAt: null,
-          createdAt: { $gt: new Date(now.getTime() - JOB_ACTIVE_WINDOW_MS) },
+          postedAt: { $gte: sourceCutoff },
         },
       ],
     },
+    // The source date is the authority for public age. This clause also applies
+    // to legacy rows with an expiry, so an import today cannot revive an old post.
+    { postedAt: { $gte: sourceCutoff } },
   ];
+}
+
+/**
+ * Sources that have their own dedicated feed, and so are excluded from `/jobs`.
+ *
+ * Only GitHub Global Internships today. Kept as a list so adding a second such
+ * feed is one entry here rather than another `$ne` in every route.
+ */
+export function dedicatedFeedSourceClauses(sources: readonly string[]): JobQueryFilter[] {
+  return sources.length === 0 ? [] : [{ source: { $nin: [...sources] } }];
 }
 
 /** `activeJobClauses` as one filter, for a query with nothing else to add. */

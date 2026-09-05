@@ -55,6 +55,11 @@ export interface RecommendedJob {
   postedAt: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Whether the apply link was verified. The card only renders an Apply button
+   * for a verified link, so this has to travel with the recommendation too.
+   */
+  applyUrlVerified: boolean;
 }
 
 export interface Recommendation {
