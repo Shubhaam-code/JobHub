@@ -30,7 +30,9 @@
     "prettier": "^3.9.6"
   },
   "dependencies": {
-    "lightningcss": "^1.33.0"
+    "esbuild": "^0.28.2",
+    "lightningcss": "^1.33.0",
+    "tsx": "^4.23.13"
   },
   "allowScripts": {}
 }
